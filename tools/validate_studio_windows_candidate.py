@@ -82,6 +82,11 @@ def main() -> int:
         "isolated install, self-test, and uninstall smoke",
     )
     require_text(
+        package_script,
+        "installedIcon = [System.IO.Path]::GetFileName($InstalledIcon)",
+    )
+    forbid_text(package_script, "installedIcon = $InstalledIcon.FullName")
+    require_text(
         inno_script,
         "#ifdef SmokeTest",
         "DASHGO_STUDIO_SMOKE_DEFAULT_DIR",

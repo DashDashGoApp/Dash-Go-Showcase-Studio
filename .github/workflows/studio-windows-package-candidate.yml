@@ -1,0 +1,255 @@
+name: Studio Windows Package Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage_run_id:
+        description: Successful Studio Stage Candidate workflow run ID for this exact commit
+        required: true
+        type: string
+
+run-name: Studio Windows package candidate from stage ${{ inputs.stage_run_id }}
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: studio-windows-package-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Build and smoke-test Windows installer
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out Studio source
+        uses: actions/checkout@v6
+
+      - name: Validate Windows package workflow source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python --version
+          python tools/validate_studio_windows_candidate.py --root .
+
+      - name: Verify Stage Candidate run and download Windows payload
+        id: stage
+        shell: pwsh
+        env:
+          STAGE_RUN_ID: ${{ inputs.stage_run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $stageRunID = $env:STAGE_RUN_ID.Trim()
+          if ($stageRunID -notmatch '^[0-9]+$') {
+              throw "stage_run_id must be a GitHub Actions run ID, got '$stageRunID'."
+          }
+
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$stageRunID" |
+              ConvertFrom-Json
+
+          if ($run.status -ne 'completed' -or $run.conclusion -ne 'success') {
+              throw "Stage Candidate run $stageRunID is not a completed successful run."
+          }
+
+          if ($run.event -ne 'workflow_dispatch' -or $run.name -ne 'Studio Stage Candidate') {
+              throw "Run $stageRunID is not a manually dispatched Studio Stage Candidate run."
+          }
+
+          if ($run.head_sha -ne $env:GITHUB_SHA) {
+              throw "Stage Candidate commit $($run.head_sha) does not match this Windows workflow commit $env:GITHUB_SHA."
+          }
+
+          $artifactResponse = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$stageRunID/artifacts?per_page=100" |
+              ConvertFrom-Json
+
+          $artifactName = "studio-stage-candidate-$($run.head_sha)"
+          $matches = @($artifactResponse.artifacts | Where-Object { $_.name -eq $artifactName -and -not $_.expired })
+          if ($matches.Count -ne 1) {
+              throw "Expected exactly one unexpired '$artifactName' artifact on Stage Candidate run $stageRunID; found $($matches.Count)."
+          }
+
+          $inputRoot = Join-Path $env:RUNNER_TEMP 'studio-windows-input'
+          $artifactZip = Join-Path $inputRoot 'stage-candidate.zip'
+          $candidateRoot = Join-Path $inputRoot 'candidate'
+          $payloadRoot = Join-Path $inputRoot 'payload'
+          Remove-Item -LiteralPath $inputRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $candidateRoot, $payloadRoot -Force | Out-Null
+
+          gh api "repos/$env:GITHUB_REPOSITORY/actions/artifacts/$($matches[0].id)/zip" --output $artifactZip
+          if ($LASTEXITCODE -ne 0) {
+              throw 'GitHub could not download the Stage Candidate artifact.'
+          }
+
+          Expand-Archive -LiteralPath $artifactZip -DestinationPath $candidateRoot -Force
+
+          $provenancePath = Join-Path $candidateRoot 'candidate-provenance.json'
+          $windowsArchive = Join-Path $candidateRoot 'windows-stage.tar.gz'
+          if (-not (Test-Path -LiteralPath $provenancePath -PathType Leaf)) {
+              throw 'Downloaded Stage Candidate artifact lacks candidate-provenance.json.'
+          }
+          if (-not (Test-Path -LiteralPath $windowsArchive -PathType Leaf)) {
+              throw 'Downloaded Stage Candidate artifact lacks windows-stage.tar.gz.'
+          }
+
+          $provenance = Get-Content -LiteralPath $provenancePath -Raw | ConvertFrom-Json
+          if ($provenance.purpose -ne 'manual package candidate only') {
+              throw 'Stage Candidate provenance has an unexpected purpose.'
+          }
+          if ($provenance.studioCommit -ne $env:GITHUB_SHA) {
+              throw "Candidate provenance commit $($provenance.studioCommit) does not match $env:GITHUB_SHA."
+          }
+
+          $expectedWindowsSha = [string]$provenance.artifacts.'windows-stage.tar.gz'
+          $actualWindowsSha = (Get-FileHash -LiteralPath $windowsArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ([string]::IsNullOrWhiteSpace($expectedWindowsSha) -or $actualWindowsSha -ne $expectedWindowsSha.ToLowerInvariant()) {
+              throw 'windows-stage.tar.gz does not match candidate provenance.'
+          }
+
+          tar.exe -xzf $windowsArchive -C $payloadRoot
+          if ($LASTEXITCODE -ne 0) {
+              throw 'Could not extract windows-stage.tar.gz.'
+          }
+
+          $stageDir = Join-Path $payloadRoot 'windows'
+          if (-not (Test-Path -LiteralPath $stageDir -PathType Container)) {
+              throw "The Windows staging archive does not contain the expected windows directory: $stageDir"
+          }
+
+          "stage_dir=$stageDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "candidate_dir=$candidateRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "stage_run_id=$stageRunID" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Install and verify official Inno Setup 7 x64
+        id: inno
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $release = Invoke-RestMethod `
+              -Uri 'https://api.github.com/repos/jrsoftware/issrc/releases/tags/is-7_0_1' `
+              -Headers @{
+                  'Accept' = 'application/vnd.github+json'
+                  'User-Agent' = 'Dash-Go-Showcase-Studio-Windows-Candidate'
+              }
+
+          $asset = @($release.assets | Where-Object { $_.name -eq 'innosetup-7.0.1-beta-x64.exe' })
+          if ($asset.Count -ne 1) {
+              throw 'Official Inno Setup release does not contain exactly one innosetup-7.0.1-beta-x64.exe asset.'
+          }
+
+          $expectedDigest = [string]$asset[0].digest
+          if ($expectedDigest -notmatch '^sha256:[0-9a-fA-F]{64}$') {
+              throw 'Official Inno Setup release did not provide a SHA-256 asset digest.'
+          }
+
+          $innoRoot = Join-Path $env:RUNNER_TEMP 'inno-setup-7'
+          $innoInstaller = Join-Path $env:RUNNER_TEMP 'innosetup-7.0.1-beta-x64.exe'
+          Remove-Item -LiteralPath $innoRoot, $innoInstaller -Recurse -Force -ErrorAction SilentlyContinue
+
+          Invoke-WebRequest -Uri $asset[0].browser_download_url -OutFile $innoInstaller
+
+          $actualDigest = (Get-FileHash -LiteralPath $innoInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualDigest -ne $expectedDigest.Substring(7).ToLowerInvariant()) {
+              throw 'Downloaded Inno Setup installer does not match the official GitHub SHA-256 asset digest.'
+          }
+
+          $signature = Get-AuthenticodeSignature -FilePath $innoInstaller
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Pyrsys B\.V\.') {
+              throw "Inno Setup installer signature verification failed: $($signature.Status); $($signature.SignerCertificate.Subject)"
+          }
+
+          $process = Start-Process `
+              -FilePath $innoInstaller `
+              -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$innoRoot") `
+              -Wait `
+              -PassThru
+          if ($process.ExitCode -ne 0) {
+              throw "Inno Setup installer failed with exit code $($process.ExitCode)."
+          }
+
+          $isccCandidates = @(Get-ChildItem -LiteralPath $innoRoot -Filter 'ISCC.exe' -File -Recurse -ErrorAction Stop)
+          if ($isccCandidates.Count -ne 1) {
+              throw "Expected exactly one ISCC.exe under $innoRoot; found $($isccCandidates.Count)."
+          }
+
+          $iscc = $isccCandidates[0].FullName
+          $innoVersion = (Get-Item -LiteralPath $iscc).VersionInfo.FileVersion
+          if ($innoVersion -notmatch '^7\.0\.1') {
+              throw "Unexpected Inno Setup compiler version '$innoVersion'; expected 7.0.1-beta."
+          }
+
+          $metadataRoot = Join-Path $env:RUNNER_TEMP 'studio-windows-diagnostics'
+          New-Item -ItemType Directory -Path $metadataRoot -Force | Out-Null
+          [pscustomobject]@{
+              schema = 1
+              source = 'official jrsoftware GitHub release is-7_0_1'
+              asset = $asset[0].name
+              assetDigest = $expectedDigest
+              compiler = $iscc
+              compilerVersion = $innoVersion
+              signatureStatus = [string]$signature.Status
+              signer = $signature.SignerCertificate.Subject
+          } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $metadataRoot 'inno-setup.json') -Encoding utf8
+
+          "iscc_path=$iscc" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "inno_version=$innoVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Build installer and run isolated install smoke
+        shell: pwsh
+        env:
+          STAGE_DIR: ${{ steps.stage.outputs.stage_dir }}
+          CANDIDATE_DIR: ${{ steps.stage.outputs.candidate_dir }}
+          STAGE_RUN_ID: ${{ steps.stage.outputs.stage_run_id }}
+          ISCC_PATH: ${{ steps.inno.outputs.iscc_path }}
+          INNO_VERSION: ${{ steps.inno.outputs.inno_version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $outputRoot = Join-Path $env:RUNNER_TEMP 'studio-windows-output'
+          $diagnosticsRoot = Join-Path $env:RUNNER_TEMP 'studio-windows-diagnostics'
+          New-Item -ItemType Directory -Path $outputRoot, $diagnosticsRoot -Force | Out-Null
+
+          & .\ci\package-windows.ps1 `
+              -StageDir $env:STAGE_DIR `
+              -IsccPath $env:ISCC_PATH `
+              -OutputDir $outputRoot `
+              -DiagnosticsDir $diagnosticsRoot
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "Windows package helper failed with exit code $LASTEXITCODE."
+          }
+
+          Copy-Item -LiteralPath (Join-Path $env:CANDIDATE_DIR 'candidate-provenance.json') `
+              -Destination (Join-Path $outputRoot 'candidate-provenance.json') `
+              -Force
+
+          [pscustomobject]@{
+              schema = 1
+              purpose = 'manual Windows package candidate only'
+              studioCommit = $env:GITHUB_SHA
+              stageRunID = $env:STAGE_RUN_ID
+              innoVersion = $env:INNO_VERSION
+          } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $outputRoot 'windows-package-provenance.json') -Encoding utf8
+
+      - name: Upload Windows package-candidate artifact
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: studio-windows-package-candidate-${{ github.sha }}
+          path: ${{ runner.temp }}/studio-windows-output/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Windows package diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: studio-windows-package-diagnostics-${{ github.sha }}
+          path: ${{ runner.temp }}/studio-windows-diagnostics/
+          if-no-files-found: warn
+          retention-days: 7

@@ -2,8 +2,37 @@ name: Studio Stage Candidate
 
 on:
   workflow_dispatch:
+    inputs:
+      candidate_origin:
+        description: "Candidate source: manual pinned baseline or immutable Dash-Go stable release"
+        required: false
+        default: manual
+        type: choice
+        options:
+          - manual
+          - dashgo-stable-release
+      dashgo_release_tag:
+        description: Exact published immutable Dash-Go stable release tag (stable-release only)
+        required: false
+        type: string
+      dashgo_version:
+        description: Exact Dash-Go stable version without v (stable-release only)
+        required: false
+        type: string
+      dashgo_source_sha256:
+        description: Exact SHA-256 of Dash-Go source release asset (stable-release only)
+        required: false
+        type: string
+      dashgo_tag_commit:
+        description: Exact commit reached by the immutable Dash-Go release tag (stable-release only)
+        required: false
+        type: string
+      dispatch_nonce:
+        description: Unique Publisher dispatch correlation nonce (stable-release only)
+        required: false
+        type: string
 
-run-name: Studio stage candidate - ${{ github.ref_name }}
+run-name: Studio stage ${{ inputs.candidate_origin }} Dash-Go ${{ inputs.dashgo_version || 'pinned' }} ${{ inputs.dispatch_nonce || github.ref_name }}
 
 permissions:
   contents: read
@@ -48,14 +77,54 @@ jobs:
           go version
           dpkg-deb --version | head -n 1
 
+      - name: Validate release-bridge contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/validate_studio_stable_release_bridge.py --root .
+
+      - name: Materialize isolated candidate source
+        id: candidate
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CANDIDATE_ORIGIN: ${{ inputs.candidate_origin }}
+          DASHGO_RELEASE_TAG: ${{ inputs.dashgo_release_tag }}
+          DASHGO_VERSION: ${{ inputs.dashgo_version }}
+          DASHGO_SOURCE_SHA256: ${{ inputs.dashgo_source_sha256 }}
+          DASHGO_TAG_COMMIT: ${{ inputs.dashgo_tag_commit }}
+          DISPATCH_NONCE: ${{ inputs.dispatch_nonce }}
+        run: |
+          set -euo pipefail
+          source_root="$RUNNER_TEMP/studio-candidate-source"
+          origin_path="$RUNNER_TEMP/studio-candidate-origin.json"
+          git worktree add --detach "$source_root" "$GITHUB_SHA"
+
+          python3 tools/prepare_dashgo_release.py \
+            --source-root "$source_root" \
+            --origin-path "$origin_path" \
+            --candidate-origin "$CANDIDATE_ORIGIN" \
+            --dashgo-release-tag "$DASHGO_RELEASE_TAG" \
+            --dashgo-version "$DASHGO_VERSION" \
+            --dashgo-source-sha256 "$DASHGO_SOURCE_SHA256" \
+            --dashgo-tag-commit "$DASHGO_TAG_COMMIT" \
+            --dispatch-nonce "$DISPATCH_NONCE"
+
+          printf 'source_root=%s\n' "$source_root" >> "$GITHUB_OUTPUT"
+          printf 'origin_path=%s\n' "$origin_path" >> "$GITHUB_OUTPUT"
+
       - name: Build staged package candidates
         shell: bash
         run: |
           set -euo pipefail
-          chmod +x ci/package-ubuntu.sh
-          ci/package-ubuntu.sh \
+          candidate_source="${{ steps.candidate.outputs.source_root }}"
+          candidate_origin="${{ steps.candidate.outputs.origin_path }}"
+          chmod +x "$candidate_source/ci/package-ubuntu.sh"
+          "$candidate_source/ci/package-ubuntu.sh" \
             "$RUNNER_TEMP/studio-stage" \
-            "$RUNNER_TEMP/studio-stage-artifacts"
+            "$RUNNER_TEMP/studio-stage-artifacts" \
+            "$candidate_origin"
+          cp "$candidate_origin" "$RUNNER_TEMP/studio-stage/candidate-origin-input.json"
 
       - name: Upload package-candidate artifacts
         if: ${{ success() }}
@@ -74,3 +143,10 @@ jobs:
           path: ${{ runner.temp }}/studio-stage/
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Remove isolated candidate source
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree remove --force "$RUNNER_TEMP/studio-candidate-source" || rm -rf "$RUNNER_TEMP/studio-candidate-source"

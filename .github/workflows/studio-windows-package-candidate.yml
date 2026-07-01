@@ -59,7 +59,7 @@ jobs:
           $expectedStageWorkflowPath = '.github/workflows/studio-stage-candidate.yml'
 
           if ($run.event -ne 'workflow_dispatch') {
-              throw "Run $stageRunID is not a manually dispatched Studio Stage Candidate run."
+              throw "Run $stageRunID is not an explicitly dispatched Studio Stage Candidate run."
           }
 
           $actualStageWorkflowPath = [string]$run.path
@@ -131,10 +131,87 @@ jobs:
               throw 'Downloaded Stage Candidate artifact lacks windows-stage.tar.gz.'
           }
 
-          $provenance = Get-Content -LiteralPath $provenancePath -Raw | ConvertFrom-Json
-          if ($provenance.purpose -ne 'manual package candidate only') {
-              throw 'Stage Candidate provenance has an unexpected purpose.'
+          function Get-RequiredObjectProperty {
+              param(
+                  [Parameter(Mandatory = $true)]$Object,
+                  [Parameter(Mandatory = $true)][string]$Name,
+                  [Parameter(Mandatory = $true)][string]$Label
+              )
+
+              $property = $Object.PSObject.Properties[$Name]
+              if ($null -eq $property -or $null -eq $property.Value) {
+                  throw "Stage Candidate provenance is missing $Label."
+              }
+              return $property.Value
           }
+
+          function Get-RequiredObjectString {
+              param(
+                  [Parameter(Mandatory = $true)]$Object,
+                  [Parameter(Mandatory = $true)][string]$Name,
+                  [Parameter(Mandatory = $true)][string]$Label
+              )
+
+              $value = [string](Get-RequiredObjectProperty -Object $Object -Name $Name -Label $Label)
+              if ([string]::IsNullOrWhiteSpace($value)) {
+                  throw "Stage Candidate provenance has an empty $Label."
+              }
+              return $value.Trim()
+          }
+
+          $provenance = Get-Content -LiteralPath $provenancePath -Raw | ConvertFrom-Json
+          $provenanceSchema = Get-RequiredObjectString -Object $provenance -Name 'schema' -Label 'schema'
+          if ($provenanceSchema -ne '2') {
+              throw "Stage Candidate provenance schema must be 2, found '$provenanceSchema'."
+          }
+
+          $provenancePurpose = Get-RequiredObjectString -Object $provenance -Name 'purpose' -Label 'purpose'
+          $candidateOrigin = Get-RequiredObjectString -Object $provenance -Name 'candidateOrigin' -Label 'candidateOrigin'
+          $allowedPurposes = @('manual package candidate only', 'stable release package candidate only')
+          if ($allowedPurposes -notcontains $provenancePurpose) {
+              throw "Stage Candidate provenance has an unexpected purpose: '$provenancePurpose'."
+          }
+          if (($provenancePurpose -eq 'manual package candidate only' -and $candidateOrigin -ne 'manual') -or
+              ($provenancePurpose -eq 'stable release package candidate only' -and $candidateOrigin -ne 'dashgo-stable-release')) {
+              throw 'Stage Candidate provenance purpose and candidate origin do not agree.'
+          }
+
+          $dashGoRelease = $null
+          if ($provenancePurpose -eq 'stable release package candidate only') {
+              $dashGoRelease = Get-RequiredObjectProperty -Object $provenance -Name 'dashGoRelease' -Label 'dashGoRelease'
+              $releaseRepository = Get-RequiredObjectString -Object $dashGoRelease -Name 'repository' -Label 'dashGoRelease.repository'
+              $releaseVersion = Get-RequiredObjectString -Object $dashGoRelease -Name 'version' -Label 'dashGoRelease.version'
+              $releaseTag = Get-RequiredObjectString -Object $dashGoRelease -Name 'releaseTag' -Label 'dashGoRelease.releaseTag'
+              $releaseCommit = Get-RequiredObjectString -Object $dashGoRelease -Name 'tagCommit' -Label 'dashGoRelease.tagCommit'
+              $releaseImmutable = Get-RequiredObjectProperty -Object $dashGoRelease -Name 'immutable' -Label 'dashGoRelease.immutable'
+              $sourceAsset = Get-RequiredObjectProperty -Object $dashGoRelease -Name 'sourceAsset' -Label 'dashGoRelease.sourceAsset'
+              $sumsAsset = Get-RequiredObjectProperty -Object $dashGoRelease -Name 'sha256SumsAsset' -Label 'dashGoRelease.sha256SumsAsset'
+              $sourceAssetName = Get-RequiredObjectString -Object $sourceAsset -Name 'name' -Label 'dashGoRelease.sourceAsset.name'
+              $sourceAssetSha = Get-RequiredObjectString -Object $sourceAsset -Name 'sha256' -Label 'dashGoRelease.sourceAsset.sha256'
+              $sumsAssetName = Get-RequiredObjectString -Object $sumsAsset -Name 'name' -Label 'dashGoRelease.sha256SumsAsset.name'
+              $sumsAssetSha = Get-RequiredObjectString -Object $sumsAsset -Name 'sha256' -Label 'dashGoRelease.sha256SumsAsset.sha256'
+              $provenanceDashGoVersion = Get-RequiredObjectString -Object $provenance -Name 'dashGoVersion' -Label 'dashGoVersion'
+              $provenanceDashGoSha = Get-RequiredObjectString -Object $provenance -Name 'dashGoSourceSha256' -Label 'dashGoSourceSha256'
+
+              if ($releaseRepository -ne 'DashDashGoApp/Dash-Go' -or
+                  $releaseVersion -ne $provenanceDashGoVersion -or
+                  $releaseTag -ne ('v{0}' -f $releaseVersion)) {
+                  throw 'Stable-release candidate provenance does not identify the expected Dash-Go release.'
+              }
+              if ($releaseImmutable -ne $true -or $releaseCommit -notmatch '^[0-9A-Fa-f]{40}$') {
+                  throw 'Stable-release candidate provenance does not prove an immutable tagged Dash-Go commit.'
+              }
+              if ($sourceAssetName -ne ('Dash-Go_{0}_source.tar.gz' -f $releaseVersion) -or
+                  $sumsAssetName -ne 'SHA256SUMS') {
+                  throw 'Stable-release candidate provenance has unexpected Dash-Go release asset names.'
+              }
+              if ($sourceAssetSha -notmatch '^[0-9A-Fa-f]{64}$' -or
+                  $sumsAssetSha -notmatch '^[0-9A-Fa-f]{64}$' -or
+                  $sourceAssetSha.ToLowerInvariant() -ne $provenanceDashGoSha.ToLowerInvariant()) {
+                  throw 'Stable-release candidate provenance has invalid or mismatched Dash-Go SHA-256 evidence.'
+              }
+          }
+
           if ($provenance.studioCommit -ne $env:GITHUB_SHA) {
               throw "Candidate provenance commit $($provenance.studioCommit) does not match $env:GITHUB_SHA."
           }
@@ -158,6 +235,8 @@ jobs:
           "stage_dir=$stageDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "candidate_dir=$candidateRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "stage_run_id=$stageRunID" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "candidate_purpose=$provenancePurpose" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "candidate_origin=$candidateOrigin" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Install and verify official Inno Setup 7 x64
         id: inno
@@ -242,6 +321,8 @@ jobs:
           STAGE_DIR: ${{ steps.stage.outputs.stage_dir }}
           CANDIDATE_DIR: ${{ steps.stage.outputs.candidate_dir }}
           STAGE_RUN_ID: ${{ steps.stage.outputs.stage_run_id }}
+          CANDIDATE_PURPOSE: ${{ steps.stage.outputs.candidate_purpose }}
+          CANDIDATE_ORIGIN: ${{ steps.stage.outputs.candidate_origin }}
           ISCC_PATH: ${{ steps.inno.outputs.iscc_path }}
           INNO_VERSION: ${{ steps.inno.outputs.inno_version }}
         run: |
@@ -261,17 +342,33 @@ jobs:
               throw "Windows package helper failed with exit code $LASTEXITCODE."
           }
 
-          Copy-Item -LiteralPath (Join-Path $env:CANDIDATE_DIR 'candidate-provenance.json') `
+          $stageProvenancePath = Join-Path $env:CANDIDATE_DIR 'candidate-provenance.json'
+          $stageProvenance = Get-Content -LiteralPath $stageProvenancePath -Raw | ConvertFrom-Json
+          $expectedWindowsPurpose = switch ($env:CANDIDATE_ORIGIN) {
+              'manual' { 'manual Windows package candidate only' }
+              'dashgo-stable-release' { 'stable release Windows package candidate only' }
+              default { throw "Unexpected candidate origin '$env:CANDIDATE_ORIGIN'." }
+          }
+          if ($env:CANDIDATE_PURPOSE -ne [string]$stageProvenance.purpose -or
+              $env:CANDIDATE_ORIGIN -ne [string]$stageProvenance.candidateOrigin) {
+              throw 'Stage candidate outputs do not agree with copied candidate provenance.'
+          }
+
+          Copy-Item -LiteralPath $stageProvenancePath `
               -Destination (Join-Path $outputRoot 'candidate-provenance.json') `
               -Force
 
           [pscustomobject]@{
-              schema = 1
-              purpose = 'manual Windows package candidate only'
+              schema = 2
+              purpose = $expectedWindowsPurpose
+              candidateOrigin = $env:CANDIDATE_ORIGIN
               studioCommit = $env:GITHUB_SHA
               stageRunID = $env:STAGE_RUN_ID
+              dashGoVersion = [string]$stageProvenance.dashGoVersion
+              dashGoSourceSha256 = [string]$stageProvenance.dashGoSourceSha256
+              dashGoRelease = $stageProvenance.dashGoRelease
               innoVersion = $env:INNO_VERSION
-          } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $outputRoot 'windows-package-provenance.json') -Encoding utf8
+          } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputRoot 'windows-package-provenance.json') -Encoding utf8
 
       - name: Upload Windows package-candidate artifact
         if: ${{ success() }}

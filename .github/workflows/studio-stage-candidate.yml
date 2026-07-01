@@ -1,0 +1,76 @@
+name: Studio Stage Candidate
+
+on:
+  workflow_dispatch:
+
+run-name: Studio stage candidate - ${{ github.ref_name }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-stage-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    name: Build and stage Linux plus Windows payloads
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out Studio source
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Set up pinned Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.4'
+          check-latest: false
+          cache: false
+
+      - name: Show tool versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 --version
+          node --version
+          go version
+          dpkg-deb --version | head -n 1
+
+      - name: Build staged package candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ci/package-ubuntu.sh
+          ci/package-ubuntu.sh \
+            "$RUNNER_TEMP/studio-stage" \
+            "$RUNNER_TEMP/studio-stage-artifacts"
+
+      - name: Upload package-candidate artifacts
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: studio-stage-candidate-${{ github.sha }}
+          path: ${{ runner.temp }}/studio-stage-artifacts/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload staging diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: studio-stage-diagnostics-${{ github.sha }}
+          path: ${{ runner.temp }}/studio-stage/
+          if-no-files-found: warn
+          retention-days: 7

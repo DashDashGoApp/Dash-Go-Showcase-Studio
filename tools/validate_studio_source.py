@@ -109,9 +109,26 @@ def main() -> int:
     for token in ("prepareStudioChildCommand(cmd)", "func (a *App) prepareScenarioForLocation", "func (a *App) stopActiveRuntime"):
         if token not in host_runtime:
             raise CheckError(f"Studio runtime isolation contract is missing: {token}")
-    for token in ("--user-data-dir=", "--remote-debugging-address=127.0.0.1", "Emulation.setDeviceMetricsOverride", "Emulation.clearDeviceMetricsOverride", "portrait-wall", "compact-portrait"):
+    for token in (
+        "--user-data-dir=",
+        "--remote-debugging-address=127.0.0.1",
+        "Emulation.setDeviceMetricsOverride",
+        "Emulation.clearDeviceMetricsOverride",
+        "Browser.getWindowForTarget",
+        "Browser.setWindowBounds",
+        "Browser.setContentsSize",
+        "wall-landscape",
+        "laptop",
+        "wide-tablet",
+        "portrait-wall",
+        "portrait-tablet",
+        "portrait-four-three",
+    ):
         if token not in host_browser:
             raise CheckError(f"Studio browser viewport contract is missing: {token}")
+    for retired in ("compact-touch", "compact-portrait"):
+        if retired in host_browser:
+            raise CheckError(f"Studio browser viewport contract still exposes retired live preset: {retired}")
     for token in ("HideWindow: true", "CreationFlags: createNoWindow"):
         if token not in child_windows:
             raise CheckError(f"Windows child no-console contract is missing: {token}")
@@ -120,10 +137,13 @@ def main() -> int:
         '\\t\\t\\t\\"ui/js/showcase-tour.js\\",\\n', '\\t\\t\\t\\"ui/js/showcase-view.js\\",\\n',
         "openOnly", "clearPrimarySurface", "dashboardListsDockEnable", "dashboardListsDockDisable", "Sample Weather Alert — Studio Preview",
         "studio_location_locked", "Ah ah ah, you didn’t say the magic word.", "showcaseGeocode", "showcaseRestrictedPost", "showcaseRestrictedGet",
-        "Clean View", "Portrait Wall", "compact-portrait",
+        "Clean View", "Fit Display", "Wall Display", "Common Laptop", "16:10 Display", "Portrait Wall", "Portrait Tablet", "4:3 Portrait",
     ):
         if token not in patcher:
             raise CheckError(f"Staged Dash-Go Studio contract is missing: {token}")
+    for retired in ("compact-touch", "compact-portrait"):
+        if retired in patcher:
+            raise CheckError(f"Staged Dash-Go Studio contract still exposes retired live preset: {retired}")
     if "const location=" in patcher or re.search(r"(?<![\w.])location\.(?:reload|assign)\(", patcher):
         raise CheckError("Staged Dash-Go tour must not shadow window.location")
     linux_uninstall = (root / "packaging/linux/dash-go-showcase-studio-uninstall").read_text(encoding="utf-8")

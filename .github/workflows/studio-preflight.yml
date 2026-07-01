@@ -1,0 +1,103 @@
+name: Studio CI Preflight
+
+on:
+  workflow_dispatch:
+
+run-name: Studio source preflight - ${{ github.ref_name }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-source-preflight-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  source-preflight:
+    name: Source validation and Go tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out Studio source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up pinned Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.4'
+          check-latest: false
+
+      - name: Show tool versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 --version
+          node --version
+          go version
+
+      - name: Verify Studio source contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/validate_studio_source.py --root .
+
+      - name: Verify pinned Go version
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(go env GOVERSION)" = "go1.26.4"
+
+      - name: Verify Go formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(gofmt -l .)"
+
+      - name: Download Go modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod download
+
+      - name: Run Go vet
+        shell: bash
+        run: |
+          set -euo pipefail
+          go vet ./...
+
+      - name: Run Go race tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -count=1 -race ./...
+
+      - name: Write preflight evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .ci-artifacts
+          sha256sum engine/Dash-Go_1.5.2_source.tar.gz > .ci-artifacts/pinned-engine.sha256
+          git rev-parse HEAD > .ci-artifacts/studio-commit.txt
+          cp studio.manifest.json .ci-artifacts/studio.manifest.json
+          go version > .ci-artifacts/go-version.txt
+          node --version > .ci-artifacts/node-version.txt
+          python3 --version > .ci-artifacts/python-version.txt
+
+      - name: Upload preflight evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-source-preflight-${{ github.sha }}
+          path: .ci-artifacts/
+          if-no-files-found: error
+          retention-days: 7

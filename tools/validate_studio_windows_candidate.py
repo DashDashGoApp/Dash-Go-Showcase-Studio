@@ -38,6 +38,13 @@ def main() -> int:
     stage_workflow = root / ".github" / "workflows" / "studio-stage-candidate.yml"
     forbid_text(workflow, "$run.name")
     forbid_text(workflow, 'actions/artifacts/$($matches[0].id)/zip" --output')
+    forbid_text(workflow, ".VersionInfo.FileVersion")
+    require_text(
+        workflow,
+        "$innoVersion = '7.0.1-beta'",
+        "$innoVersionVerification",
+        "compilerVersionVerification = $innoVersionVerification",
+    )
     require_text(workflow, "Invoke-WebRequest", "$env:GITHUB_API_URL", "Authorization", "-OutFile $artifactZip", "stage-input.json")
     require_text(workflow, "expectedStageWorkflowPath", "$run.path", "studio-stage-candidate.yml")
 

@@ -438,6 +438,12 @@ def package_windows_stage(ctx: Context, staged_app: Path, host: Path, cli_host: 
     shutil.copy2(engine, target_server)
     shutil.copy2(host, root / "dash-go-showcase-studio.exe")
     shutil.copy2(cli_host, root / "dash-go-showcase-studio-cli.exe")
+    windows_icon = ctx.source / "assets" / "branding" / "dash-go-showcase-studio.ico"
+    if not windows_icon.is_file() or windows_icon.read_bytes()[:4] != b"\0\0\1\0":
+        raise BuildFailure("Windows package", "Branding", "missing or invalid Windows Studio icon")
+    icon_target = root / "assets" / "branding" / windows_icon.name
+    icon_target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(windows_icon, icon_target)
     for name in ("NOTICE.md", "LICENSE", "DASH-GO-THIRD-PARTY-NOTICES.md"):
         shutil.copy2(ctx.source / name, root / name)
     write_json(root / "STUDIO_RUNTIME.json", {"schema": 1, "studioVersion": ctx.version, "dashGoVersion": ctx.dashgo_version, "fixtureSchema": ctx.manifest["fixtureSchema"], "scenarioCatalog": ctx.manifest["scenarioCatalog"], "platform": "windows-amd64", "builtAt": now_utc()})
@@ -490,6 +496,15 @@ def package_linux(ctx: Context, staged_app: Path, host: Path, engine: Path) -> P
         desktop = root / "usr/share/applications/dash-go-showcase-studio.desktop"
         desktop.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ctx.source / "packaging/linux/dash-go-showcase-studio.desktop", desktop)
+
+        linux_icons = ctx.source / "assets" / "branding" / "linux" / "hicolor"
+        if not linux_icons.is_dir():
+            raise BuildFailure("Linux package", "Branding", "missing Linux Studio hicolor icon tree")
+        shutil.copytree(linux_icons, root / "usr/share/icons/hicolor", dirs_exist_ok=True, copy_function=shutil.copy2)
+        packaged_svg = root / "usr/share/icons/hicolor/scalable/apps/dash-go-showcase-studio.svg"
+        packaged_png = root / "usr/share/icons/hicolor/48x48/apps/dash-go-showcase-studio.png"
+        if not packaged_svg.is_file() or not packaged_png.is_file():
+            raise BuildFailure("Linux package", "Branding", "Linux Studio icon files were not staged")
         docs = root / "usr/share/doc/dash-go-showcase-studio"
         docs.mkdir(parents=True, exist_ok=True)
         (docs / "README.Debian").write_text("Full removal: dash-go-showcase-studio-uninstall --purge\n", encoding="utf-8")
@@ -506,6 +521,9 @@ def package_linux(ctx: Context, staged_app: Path, host: Path, engine: Path) -> P
         contents = run(ctx, "Inspect Linux deb contents", ["dpkg-deb", "--contents", str(deb)], cwd=native, timeout=120)
         if "dash-go-showcase-studio-uninstall" not in contents:
             raise BuildFailure("Build Linux deb", "Package contents", "Linux package omitted full-removal wrapper")
+        for icon in ("usr/share/icons/hicolor/48x48/apps/dash-go-showcase-studio.png", "usr/share/icons/hicolor/scalable/apps/dash-go-showcase-studio.svg"):
+            if icon not in contents:
+                raise BuildFailure("Build Linux deb", "Package contents", f"Linux package omitted required Studio icon: {icon}")
         output = ctx.work / "artifacts" / deb.name
         output.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(deb, output)
@@ -592,6 +610,7 @@ def main() -> int:
         with phase(ctx, 1, "Validate source contract and manifest"):
             validate_manifest(ctx)
             run(ctx, "Studio source validation", [sys.executable, "tools/validate_studio_source.py", "--root", str(source)], cwd=source, timeout=120)
+            run(ctx, "Studio branding asset validation", [sys.executable, "tools/validate_studio_branding.py", "--root", str(source)], cwd=source, timeout=120)
             source_privacy_sanity(ctx)
         with phase(ctx, 2, "Verify tools and pinned Go compiler"):
             need_file(Path(ctx.go), "selected Go compiler", "")

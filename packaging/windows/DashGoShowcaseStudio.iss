@@ -53,6 +53,8 @@ OutputBaseFilename=Dash-Go_Showcase_Studio_{#StudioVersion}_Windows_Setup
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile={#StageDir}\assets\branding\dash-go-showcase-studio.ico
+UninstallDisplayIcon={app}\assets\branding\dash-go-showcase-studio.ico
 SetupArchitecture=x64
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -67,8 +69,8 @@ Name: desktopicon; Description: "Create a &desktop shortcut"; GroupDescription: 
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\Dash-Go Showcase Studio"; Filename: "{app}\{#StudioExe}"; WorkingDir: "{app}"; Comment: "Explore Dash-Go with safe local showcase data"
-Name: "{autodesktop}\Dash-Go Showcase Studio"; Filename: "{app}\{#StudioExe}"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autoprograms}\Dash-Go Showcase Studio"; Filename: "{app}\{#StudioExe}"; WorkingDir: "{app}"; IconFilename: "{app}\assets\branding\dash-go-showcase-studio.ico"; Comment: "Explore Dash-Go with safe local showcase data"
+Name: "{autodesktop}\Dash-Go Showcase Studio"; Filename: "{app}\{#StudioExe}"; WorkingDir: "{app}"; IconFilename: "{app}\assets\branding\dash-go-showcase-studio.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#StudioExe}"; Description: "Launch Dash-Go Showcase Studio"; Flags: nowait postinstall skipifsilent

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static fail-closed validation for the manual Windows package-candidate lane."""
+"""Static fail-closed validation for the Windows package-candidate lane."""
 from __future__ import annotations
 
 import argparse
@@ -22,9 +22,9 @@ def require_text(path: Path, *snippets: str) -> None:
 def forbid_text(path: Path, snippet: str) -> None:
     if not path.is_file():
         raise ValidationError(f"missing required file: {path}")
-    text = path.read_text(encoding="utf-8")
-    if snippet in text:
+    if snippet in path.read_text(encoding="utf-8"):
         raise ValidationError(f"{path}: forbidden legacy statement: {snippet}")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -36,6 +36,7 @@ def main() -> int:
     package_script = root / "ci" / "package-windows.ps1"
     inno_script = root / "packaging" / "windows" / "DashGoShowcaseStudio.iss"
     stage_workflow = root / ".github" / "workflows" / "studio-stage-candidate.yml"
+
     require_text(
         package_script,
         "STUDIO_RUNTIME.json",
@@ -49,24 +50,35 @@ def main() -> int:
     forbid_text(workflow, "$run.name")
     forbid_text(workflow, 'actions/artifacts/$($matches[0].id)/zip" --output')
     forbid_text(workflow, ".VersionInfo.FileVersion")
+
     require_text(
         workflow,
         "$innoVersion = '7.0.1-beta'",
         "$innoVersionVerification",
         "compilerVersionVerification = $innoVersionVerification",
-    )
-    require_text(workflow, "Invoke-WebRequest", "$env:GITHUB_API_URL", "Authorization", "-OutFile $artifactZip", "stage-input.json")
-    require_text(workflow, "expectedStageWorkflowPath", "$run.path", "studio-stage-candidate.yml")
-
-    require_text(
-        workflow,
+        "Invoke-WebRequest",
+        "$env:GITHUB_API_URL",
+        "Authorization",
+        "-OutFile $artifactZip",
+        "stage-input.json",
+        "expectedStageWorkflowPath",
+        "$run.path",
+        "studio-stage-candidate.yml",
         "name: Studio Windows Package Candidate",
         "stage_run_id:",
         "runs-on: windows-2025",
         "actions: read",
-        "Studio Stage Candidate",
+        "explicitly dispatched Studio Stage Candidate run",
         "windows-stage.tar.gz",
         "candidate-provenance.json",
+        "windows-package-provenance.json",
+        "candidateOrigin",
+        "manual package candidate only",
+        "stable release package candidate only",
+        "manual Windows package candidate only",
+        "stable release Windows package candidate only",
+        "dashGoRelease",
+        "Get-RequiredObjectString",
         "innosetup-7.0.1-beta-x64.exe",
         "Get-AuthenticodeSignature",
         "Pyrsys B",
@@ -80,9 +92,6 @@ def main() -> int:
         "PURGE SHOWCASE STUDIO",
         "/DSmokeTest=1",
         "isolated install, self-test, and uninstall smoke",
-    )
-    require_text(
-        package_script,
         "installedIcon = [System.IO.Path]::GetFileName($InstalledIcon)",
     )
     forbid_text(package_script, "installedIcon = $InstalledIcon.FullName")
@@ -93,7 +102,18 @@ def main() -> int:
         "DASHGO_STUDIO_SMOKE_STATE_ROOT",
         "--action purge",
     )
-    require_text(stage_workflow, "name: Studio Stage Candidate", "studio-stage-candidate-${{ github.sha }}")
+    require_text(
+        stage_workflow,
+        "name: Studio Stage Candidate",
+        "studio-stage-candidate-${{ github.sha }}",
+        "candidate_origin:",
+        "dashgo_release_tag:",
+        "dashgo_source_sha256:",
+        "dashgo_tag_commit:",
+        "dispatch_nonce:",
+        "tools/prepare_dashgo_release.py",
+        "git worktree add --detach",
+    )
 
     print("Studio Windows package-candidate workflow source is internally consistent.")
     return 0

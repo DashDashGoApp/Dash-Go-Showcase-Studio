@@ -64,6 +64,31 @@ var showcaseViewports = []viewportSpec{
 	{ID: "portrait-four-three", Label: "4:3 Portrait", Width: 768, Height: 1024, Orientation: "portrait"},
 }
 
+// startupShowcaseViewports intentionally includes a non-public compact fallback.
+// It is only used for the first normal Studio window. The interactive Showcase
+// View catalog remains the curated list above.
+var startupShowcaseViewports = []viewportSpec{
+	{ID: "wall-landscape", Label: "Wall Display", Width: 1920, Height: 1080, Orientation: "landscape"},
+	{ID: "laptop", Label: "Common Laptop", Width: 1366, Height: 768, Orientation: "landscape"},
+	{ID: "wide-tablet", Label: "16:10 Display", Width: 1280, Height: 800, Orientation: "landscape"},
+	{ID: "startup-compact", Label: "Compact Startup", Width: 1024, Height: 600, Orientation: "landscape"},
+}
+
+// selectStartupViewport chooses the largest normal landscape window whose
+// native outer bounds fit inside the browser-reported work area. It never
+// chooses Fit because Fit is an explicit user command that maximizes later.
+func selectStartupViewport(workWidth, workHeight, frameWidth, frameHeight int) (viewportSpec, bool) {
+	if workWidth < 1 || workHeight < 1 || frameWidth < 0 || frameHeight < 0 {
+		return viewportSpec{}, false
+	}
+	for _, view := range startupShowcaseViewports {
+		if view.Width+frameWidth <= workWidth && view.Height+frameHeight <= workHeight {
+			return view, true
+		}
+	}
+	return viewportSpec{}, false
+}
+
 func allShowcaseViewports() []viewportSpec {
 	result := make([]viewportSpec, len(showcaseViewports))
 	copy(result, showcaseViewports)
@@ -169,9 +194,12 @@ func (a *App) launchBrowser(pageURL string) error {
 		"--remote-allow-origins=http://127.0.0.1,http://localhost",
 		"--app=" + pageURL,
 	}
-	if view.Fit {
-		args = append(args, "--start-maximized")
-	} else {
+	if view.Fit && !a.options.Kiosk {
+		// Start normal and inspect the work area before selecting a preset. A
+		// normal bootstrap window lets the adaptive path account for title-bar
+		// chrome and taskbar-safe space instead of treating Fit as maximized.
+		args = append(args, "--window-size=1024,600")
+	} else if !view.Fit {
 		args = append(args, fmt.Sprintf("--window-size=%d,%d", view.Width, view.Height))
 	}
 	if a.options.Kiosk {
@@ -193,16 +221,50 @@ func (a *App) launchBrowser(pageURL string) error {
 		a.browser = nil
 		a.mu.Unlock()
 	}()
-	if !view.Fit {
+	effectiveView := view
+	if view.Fit && !a.options.Kiosk {
+		startupView, found, err := a.adaptiveStartupViewport()
+		if err != nil {
+			if a.options.Trace {
+				fmt.Printf("Showcase adaptive startup warning: %v\n", err)
+			}
+		} else if found {
+			effectiveView = startupView
+			if a.options.Trace {
+				fmt.Printf("Showcase adaptive startup viewport: %s (%dx%d)\n", effectiveView.ID, effectiveView.Width, effectiveView.Height)
+			}
+		} else if a.options.Trace {
+			fmt.Println("Showcase adaptive startup found no safe preset; retaining the normal bootstrap window.")
+		}
+	}
+
+	if !effectiveView.Fit {
 		// Apply the requested native contents size and matching CSS viewport after
 		// Chromium has made its private page target available. The short retry keeps
 		// startup deterministic while preserving the host display configuration.
-		if _, err := a.applyViewport(view); err != nil && a.options.Trace {
+		if _, err := a.applyViewport(effectiveView); err != nil && a.options.Trace {
 			fmt.Printf("Showcase viewport setup warning: %v\n", err)
 		}
 	}
 
 	return cmd.Wait()
+}
+
+func (a *App) adaptiveStartupViewport() (viewportSpec, bool, error) {
+	a.mu.Lock()
+	session := a.browser
+	a.mu.Unlock()
+	if session == nil || session.debugPort < 1 {
+		return viewportSpec{}, false, fmt.Errorf("the private Studio browser is not ready for adaptive startup sizing")
+	}
+
+	workWidth, workHeight, frameWidth, frameHeight, err := cdpDisplayWorkArea(session.debugPort)
+	if err != nil {
+		return viewportSpec{}, false, err
+	}
+
+	view, ok := selectStartupViewport(workWidth, workHeight, frameWidth, frameHeight)
+	return view, ok, nil
 }
 
 func (a *App) applyViewportPreset(id string) (viewportResult, error) {
@@ -311,6 +373,36 @@ func applyChromiumViewportOnce(port int, view viewportSpec, result *viewportResu
 	}
 
 	return nil
+}
+
+func cdpDisplayWorkArea(port int) (int, int, int, int, error) {
+	metrics, err := cdpCall(port, "Runtime.evaluate", map[string]any{
+		"expression":    "JSON.stringify({availWidth:screen.availWidth,availHeight:screen.availHeight,innerWidth:window.innerWidth,innerHeight:window.innerHeight,outerWidth:window.outerWidth,outerHeight:window.outerHeight})",
+		"returnByValue": true,
+	})
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+
+	result, _ := metrics["result"].(map[string]any)
+	raw, _ := result["result"].(map[string]any)
+	value, _ := raw["value"].(string)
+	var data struct {
+		AvailWidth  int `json:"availWidth"`
+		AvailHeight int `json:"availHeight"`
+		InnerWidth  int `json:"innerWidth"`
+		InnerHeight int `json:"innerHeight"`
+		OuterWidth  int `json:"outerWidth"`
+		OuterHeight int `json:"outerHeight"`
+	}
+	if err := json.Unmarshal([]byte(value), &data); err != nil {
+		return 0, 0, 0, 0, fmt.Errorf("decode Chromium work-area metrics: %w", err)
+	}
+	if data.AvailWidth < 1 || data.AvailHeight < 1 || data.InnerWidth < 1 || data.InnerHeight < 1 || data.OuterWidth < data.InnerWidth || data.OuterHeight < data.InnerHeight {
+		return 0, 0, 0, 0, fmt.Errorf("Chromium returned invalid work-area metrics")
+	}
+
+	return data.AvailWidth, data.AvailHeight, data.OuterWidth - data.InnerWidth, data.OuterHeight - data.InnerHeight, nil
 }
 
 func cdpWindowMetrics(response map[string]any) (int, int, int, int) {

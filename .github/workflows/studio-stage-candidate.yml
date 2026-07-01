@@ -31,8 +31,12 @@ on:
         description: Unique Publisher dispatch correlation nonce (stable-release only)
         required: false
         type: string
+      release_package_version:
+        description: Public Studio package identity (stable-release only; defaults to Dash-Go version, or Dash-Go X.Y.Z-rN for a controlled reissue)
+        required: false
+        type: string
 
-run-name: Studio stage ${{ inputs.candidate_origin }} Dash-Go ${{ inputs.dashgo_version || 'pinned' }} ${{ inputs.dispatch_nonce || github.ref_name }}
+run-name: Studio stage ${{ inputs.candidate_origin }} Dash-Go ${{ inputs.release_package_version || inputs.dashgo_version || 'pinned' }} ${{ inputs.dispatch_nonce || github.ref_name }}
 
 permissions:
   contents: read
@@ -94,6 +98,7 @@ jobs:
           DASHGO_SOURCE_SHA256: ${{ inputs.dashgo_source_sha256 }}
           DASHGO_TAG_COMMIT: ${{ inputs.dashgo_tag_commit }}
           DISPATCH_NONCE: ${{ inputs.dispatch_nonce }}
+          RELEASE_PACKAGE_VERSION: ${{ inputs.release_package_version }}
         run: |
           set -euo pipefail
           source_root="$RUNNER_TEMP/studio-candidate-source"
@@ -108,7 +113,8 @@ jobs:
             --dashgo-version "$DASHGO_VERSION" \
             --dashgo-source-sha256 "$DASHGO_SOURCE_SHA256" \
             --dashgo-tag-commit "$DASHGO_TAG_COMMIT" \
-            --dispatch-nonce "$DISPATCH_NONCE"
+            --dispatch-nonce "$DISPATCH_NONCE" \
+            --release-package-version "$RELEASE_PACKAGE_VERSION"
 
           printf 'source_root=%s\n' "$source_root" >> "$GITHUB_OUTPUT"
           printf 'origin_path=%s\n' "$origin_path" >> "$GITHUB_OUTPUT"

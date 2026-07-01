@@ -15,7 +15,7 @@ manifest and its pinned `engine/Dash-Go_<version>_source.tar.gz` baseline.
 
 A stable-release dispatch must use `candidate_origin=dashgo-stable-release` and
 supply the exact Dash-Go `vX.Y.Z` tag, version, source-asset SHA-256, tag commit,
-and a correlation nonce. Stage creates a disposable detached Studio worktree and
+a correlation nonce, and an optional `release_package_version` reissue identity. Stage creates a disposable detached Studio worktree and
 independently verifies all of these facts against the canonical
 `DashDashGoApp/Dash-Go` GitHub Release API:
 

@@ -79,3 +79,40 @@ func TestCDPWindowID(t *testing.T) {
 		}
 	}
 }
+
+func TestSelectStartupViewportPrefersLargestSafeLandscapePreset(t *testing.T) {
+	view, ok := selectStartupViewport(2560, 1440, 16, 80)
+	if !ok {
+		t.Fatal("expected a startup viewport")
+	}
+	if view.ID != "wall-landscape" || view.Width != 1920 || view.Height != 1080 {
+		t.Fatalf("startup viewport = %#v, want 1920x1080 wall-landscape", view)
+	}
+}
+
+func TestSelectStartupViewportAccountsForWindowChromeAndFallsBack(t *testing.T) {
+	view, ok := selectStartupViewport(1920, 1080, 16, 80)
+	if !ok {
+		t.Fatal("expected a fallback startup viewport")
+	}
+	if view.ID != "laptop" || view.Width != 1366 || view.Height != 768 {
+		t.Fatalf("startup viewport = %#v, want 1366x768 laptop", view)
+	}
+
+	compact, ok := selectStartupViewport(1366, 768, 16, 80)
+	if !ok {
+		t.Fatal("expected compact startup fallback")
+	}
+	if compact.ID != "startup-compact" || compact.Width != 1024 || compact.Height != 600 {
+		t.Fatalf("compact startup viewport = %#v, want 1024x600", compact)
+	}
+}
+
+func TestSelectStartupViewportLeavesNoFitToMaximize(t *testing.T) {
+	if view, ok := selectStartupViewport(900, 600, 16, 80); ok {
+		t.Fatalf("unexpected startup viewport for unsafe work area: %#v", view)
+	}
+	if view, ok := selectStartupViewport(0, 1080, 16, 80); ok {
+		t.Fatalf("unexpected startup viewport for invalid work area: %#v", view)
+	}
+}

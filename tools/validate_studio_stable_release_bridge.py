@@ -28,6 +28,7 @@ def main() -> int:
     stage = root / ".github" / "workflows" / "studio-stage-candidate.yml"
     windows = root / ".github" / "workflows" / "studio-windows-package-candidate.yml"
     package = root / "ci" / "package-ubuntu.sh"
+    stage_package = root / "ci" / "stage-package.py"
     intake = root / "tools" / "prepare_dashgo_release.py"
 
     require_text(
@@ -38,6 +39,7 @@ def main() -> int:
         "dashgo_source_sha256:",
         "dashgo_tag_commit:",
         "dispatch_nonce:",
+        "release_package_version:",
         "git worktree add --detach",
         "tools/prepare_dashgo_release.py",
         "candidate-origin-input.json",
@@ -51,7 +53,14 @@ def main() -> int:
         "manual package candidate only",
         "stable release package candidate only",
         "candidateOrigin",
+        "releasePackageVersion",
         "dashGoRelease",
+    )
+    require_text(
+        stage_package,
+        "releasePackageVersion",
+        "Dash-Go_Showcase_Studio_",
+        "Linux_amd64.deb",
     )
     require_text(
         intake,
@@ -64,6 +73,8 @@ def main() -> int:
         "git/ref/tags",
         "Dash-Go source archive root must be exactly",
         "Dash-Go release/release.json is not the expected stable release contract",
+        "release-package-version",
+        "releasePackageVersion",
     )
     require_text(
         windows,
@@ -76,6 +87,8 @@ def main() -> int:
         "windows-package-provenance.json",
         "stable release Windows package candidate only",
         "candidateOrigin",
+        "releasePackageVersion",
+        "installerName",
     )
 
     print("Studio stable-release bridge source is internally consistent.")

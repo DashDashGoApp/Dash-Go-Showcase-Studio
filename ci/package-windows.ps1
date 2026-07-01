@@ -78,6 +78,11 @@ if ($StudioVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$') {
     throw "Staged Studio runtime version is invalid: '$StudioVersion'."
 }
 
+$ReleasePackageVersion = [string]$RuntimeObject.releasePackageVersion
+if ($ReleasePackageVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-(?:test\.[0-9]+|r[1-9][0-9]*))?$') {
+    throw "Staged release package version is invalid: '$ReleasePackageVersion'."
+}
+
 $RuntimePlatform = [string]$RuntimeObject.platform
 if ($RuntimePlatform -ne 'windows-amd64') {
     throw "Staged Studio runtime platform is invalid: '$RuntimePlatform'."
@@ -101,12 +106,13 @@ foreach ($RelativePath in $RequiredStageFiles) {
 $NormalInstallerArgs = @(
     "/DStageDir=$StageDir",
     "/DStudioVersion=$StudioVersion",
+    "/DReleasePackageVersion=$ReleasePackageVersion",
     "/DOutputDir=$OutputDir",
     $InstallerScript
 )
 Invoke-CheckedExternal -FilePath $IsccPath -ArgumentList $NormalInstallerArgs -Label 'Production Inno Setup compilation'
 
-$InstallerName = "Dash-Go_Showcase_Studio_${StudioVersion}_Windows_Setup.exe"
+$InstallerName = "Dash-Go_Showcase_Studio_${ReleasePackageVersion}_Windows_Setup.exe"
 $InstallerPath = Join-Path $OutputDir $InstallerName
 $InstallerPath = Resolve-RequiredFile -Path $InstallerPath -Label 'Windows installer candidate'
 
@@ -122,6 +128,7 @@ $env:DASHGO_STUDIO_SMOKE_STATE_ROOT = $SmokeStateRoot
 $SmokeInstallerArgs = @(
     "/DStageDir=$StageDir",
     "/DStudioVersion=$StudioVersion",
+    "/DReleasePackageVersion=$ReleasePackageVersion",
     "/DOutputDir=$SmokeOutputRoot",
     '/DSmokeTest=1',
     $InstallerScript
@@ -178,6 +185,7 @@ if (Test-Path -LiteralPath (Join-Path $SmokeInstallRoot 'dash-go-showcase-studio
     schema = 1
     result = 'PASS'
     studioVersion = $StudioVersion
+    releasePackageVersion = $ReleasePackageVersion
     stageExecutable = $StudioExe.FullName
     installer = [System.IO.Path]::GetFileName($InstallerPath)
     installerSha256 = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash.ToLowerInvariant()

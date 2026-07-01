@@ -183,7 +183,17 @@ def parse_sums(path: Path, source_name: str) -> str:
     return matches[0]
 
 
-def update_manifest(source_root: Path, version: str, archive_hash: str) -> None:
+def require_release_package_version(value: str, dashgo_version: str) -> str:
+    package_version = value.strip() if value else dashgo_version
+    pattern = re.escape(dashgo_version) + r"(?:-r[1-9][0-9]*)?"
+    if not re.fullmatch(pattern, package_version):
+        raise ReleaseInputError(
+            "release package version must equal the Dash-Go stable version or use its -rN reissue suffix"
+        )
+    return package_version
+
+
+def update_manifest(source_root: Path, version: str, archive_hash: str, release_package_version: str) -> None:
     manifest_path = source_root / "studio.manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     archive_relative = f"engine/Dash-Go_{version}_source.tar.gz"
@@ -192,6 +202,7 @@ def update_manifest(source_root: Path, version: str, archive_hash: str) -> None:
             "dashGoVersion": version,
             "dashGoSourceArchive": archive_relative,
             "dashGoSourceSha256": archive_hash,
+            "releasePackageVersion": release_package_version,
         }
     )
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=False) + "\n", encoding="utf-8")
@@ -214,6 +225,7 @@ def main() -> int:
     parser.add_argument("--dashgo-source-sha256", default="")
     parser.add_argument("--dashgo-tag-commit", default="")
     parser.add_argument("--dispatch-nonce", default="")
+    parser.add_argument("--release-package-version", default="")
     parser.add_argument("--github-api-url", default="https://api.github.com")
     args = parser.parse_args()
 
@@ -229,7 +241,7 @@ def main() -> int:
     }
 
     if args.candidate_origin == "manual":
-        if any((args.dashgo_release_tag, args.dashgo_version, args.dashgo_source_sha256, args.dashgo_tag_commit, args.dispatch_nonce)):
+        if any((args.dashgo_release_tag, args.dashgo_version, args.dashgo_source_sha256, args.dashgo_tag_commit, args.dispatch_nonce, args.release_package_version)):
             raise ReleaseInputError("manual Stage input must not supply Dash-Go release bridge fields")
         manifest = json.loads((source_root / "studio.manifest.json").read_text(encoding="utf-8"))
         common.update(
@@ -237,6 +249,7 @@ def main() -> int:
                 "purpose": MANUAL_PURPOSE,
                 "dashGoRelease": None,
                 "dashGoVersion": require_string(manifest.get("dashGoVersion"), "pinned Dash-Go version"),
+                "releasePackageVersion": require_string(manifest.get("releasePackageVersion", manifest.get("studioVersion")), "pinned release package version"),
                 "dashGoSourceSha256": require_sha256(require_string(manifest.get("dashGoSourceSha256"), "pinned Dash-Go source SHA-256"), "pinned Dash-Go source SHA-256"),
             }
         )
@@ -249,6 +262,7 @@ def main() -> int:
     expected_source_hash = require_sha256(require_string(args.dashgo_source_sha256, "Dash-Go source SHA-256"), "Dash-Go source SHA-256")
     expected_tag_commit = require_commit(require_string(args.dashgo_tag_commit, "Dash-Go tag commit"), "Dash-Go tag commit")
     nonce = require_string(args.dispatch_nonce, "dispatch nonce")
+    release_package_version = require_release_package_version(args.release_package_version, version)
     if tag != f"v{version}":
         raise ReleaseInputError("Dash-Go release tag must exactly match the stable version")
     if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._-]{7,127}", nonce):
@@ -298,11 +312,12 @@ def main() -> int:
             raise ReleaseInputError("Dash-Go source archive changed while staging the Studio baseline")
         os.replace(stage, archive_target)
 
-    update_manifest(source_root, version, source_digest)
+    update_manifest(source_root, version, source_digest, release_package_version)
     common.update(
         {
             "purpose": STABLE_PURPOSE,
             "dashGoVersion": version,
+            "releasePackageVersion": release_package_version,
             "dashGoSourceSha256": source_digest,
             "dashGoRelease": {
                 "repository": DASHGO_REPOSITORY,

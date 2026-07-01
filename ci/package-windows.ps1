@@ -44,7 +44,7 @@ function Invoke-CheckedExternal {
 
 function Require-ExactlyOneFile {
     param(
-        [Parameter(Mandatory)] [System.IO.FileInfo[]] $Candidates,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [System.IO.FileInfo[]] $Candidates,
         [Parameter(Mandatory)] [string] $Label
     )
 
@@ -68,14 +68,19 @@ if ($StageDir -match '\s' -or $OutputDir -match '\s' -or $DiagnosticsDir -match 
 Remove-Item -LiteralPath $OutputDir -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $OutputDir, $DiagnosticsDir -Force | Out-Null
 
-$Manifest = Require-ExactlyOneFile `
-    -Candidates @(Get-ChildItem -LiteralPath $StageDir -Filter 'studio.manifest.json' -File -Recurse) `
-    -Label 'staged studio.manifest.json'
+$RuntimeMetadata = Resolve-RequiredFile `
+    -Path (Join-Path $StageDir 'STUDIO_RUNTIME.json') `
+    -Label 'staged Studio runtime metadata'
 
-$ManifestObject = Get-Content -LiteralPath $Manifest.FullName -Raw | ConvertFrom-Json
-$StudioVersion = [string]$ManifestObject.studioVersion
+$RuntimeObject = Get-Content -LiteralPath $RuntimeMetadata -Raw | ConvertFrom-Json
+$StudioVersion = [string]$RuntimeObject.studioVersion
 if ($StudioVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$') {
-    throw "Staged Studio version is invalid: '$StudioVersion'."
+    throw "Staged Studio runtime version is invalid: '$StudioVersion'."
+}
+
+$RuntimePlatform = [string]$RuntimeObject.platform
+if ($RuntimePlatform -ne 'windows-amd64') {
+    throw "Staged Studio runtime platform is invalid: '$RuntimePlatform'."
 }
 
 $StudioExe = Require-ExactlyOneFile `
@@ -83,9 +88,7 @@ $StudioExe = Require-ExactlyOneFile `
     -Label 'staged Windows Studio executable'
 
 $RequiredStageFiles = @(
-    'assets\branding\dash-go-showcase-studio.ico',
-    'assets\branding\dash-go-showcase-studio.svg',
-    'assets\branding\linux\hicolor\scalable\apps\dash-go-showcase-studio.svg'
+    'assets\branding\dash-go-showcase-studio.ico'
 )
 
 foreach ($RelativePath in $RequiredStageFiles) {

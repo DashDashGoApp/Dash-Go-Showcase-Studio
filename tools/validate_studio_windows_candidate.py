@@ -36,6 +36,16 @@ def main() -> int:
     package_script = root / "ci" / "package-windows.ps1"
     inno_script = root / "packaging" / "windows" / "DashGoShowcaseStudio.iss"
     stage_workflow = root / ".github" / "workflows" / "studio-stage-candidate.yml"
+    require_text(
+        package_script,
+        "STUDIO_RUNTIME.json",
+        "windows-amd64",
+        "AllowEmptyCollection",
+        r"assets\branding\dash-go-showcase-studio.ico",
+    )
+    forbid_text(package_script, "studio.manifest.json")
+    forbid_text(package_script, r"assets\branding\dash-go-showcase-studio.svg")
+    forbid_text(package_script, r"assets\branding\linux\hicolor\scalable\apps\dash-go-showcase-studio.svg")
     forbid_text(workflow, "$run.name")
     forbid_text(workflow, 'actions/artifacts/$($matches[0].id)/zip" --output')
     forbid_text(workflow, ".VersionInfo.FileVersion")

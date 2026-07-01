@@ -95,10 +95,30 @@ jobs:
           Remove-Item -LiteralPath $inputRoot -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path $candidateRoot, $payloadRoot -Force | Out-Null
 
-          gh api "repos/$env:GITHUB_REPOSITORY/actions/artifacts/$($matches[0].id)/zip" --output $artifactZip
-          if ($LASTEXITCODE -ne 0) {
-              throw 'GitHub could not download the Stage Candidate artifact.'
+          $diagnosticsRoot = Join-Path $env:RUNNER_TEMP 'studio-windows-diagnostics'
+          New-Item -ItemType Directory -Path $diagnosticsRoot -Force | Out-Null
+
+          [pscustomobject]@{
+              schema = 1
+              stageRunID = $stageRunID
+              studioCommit = [string]$run.head_sha
+              stageWorkflowPath = $actualStageWorkflowPath
+              artifactID = [string]$matches[0].id
+              artifactName = $artifactName
+          } | ConvertTo-Json -Depth 4 |
+              Set-Content -LiteralPath (Join-Path $diagnosticsRoot 'stage-input.json') -Encoding utf8
+
+          $artifactHeaders = @{
+              'Accept' = 'application/vnd.github+json'
+              'Authorization' = "Bearer $env:GH_TOKEN"
+              'X-GitHub-Api-Version' = '2022-11-28'
           }
+
+          Invoke-WebRequest `
+              -Uri "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/actions/artifacts/$($matches[0].id)/zip" `
+              -Headers $artifactHeaders `
+              -OutFile $artifactZip `
+              -ErrorAction Stop
 
           Expand-Archive -LiteralPath $artifactZip -DestinationPath $candidateRoot -Force
 

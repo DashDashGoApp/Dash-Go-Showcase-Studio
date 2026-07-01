@@ -37,6 +37,8 @@ def main() -> int:
     inno_script = root / "packaging" / "windows" / "DashGoShowcaseStudio.iss"
     stage_workflow = root / ".github" / "workflows" / "studio-stage-candidate.yml"
     forbid_text(workflow, "$run.name")
+    forbid_text(workflow, 'actions/artifacts/$($matches[0].id)/zip" --output')
+    require_text(workflow, "Invoke-WebRequest", "$env:GITHUB_API_URL", "Authorization", "-OutFile $artifactZip", "stage-input.json")
     require_text(workflow, "expectedStageWorkflowPath", "$run.path", "studio-stage-candidate.yml")
 
     require_text(

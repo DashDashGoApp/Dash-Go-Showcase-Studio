@@ -19,6 +19,13 @@ def require_text(path: Path, *snippets: str) -> None:
             raise ValidationError(f"{path}: missing required statement: {snippet}")
 
 
+def forbid_text(path: Path, snippet: str) -> None:
+    if not path.is_file():
+        raise ValidationError(f"missing required file: {path}")
+    text = path.read_text(encoding="utf-8")
+    if snippet in text:
+        raise ValidationError(f"{path}: forbidden legacy statement: {snippet}")
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True)
@@ -29,6 +36,8 @@ def main() -> int:
     package_script = root / "ci" / "package-windows.ps1"
     inno_script = root / "packaging" / "windows" / "DashGoShowcaseStudio.iss"
     stage_workflow = root / ".github" / "workflows" / "studio-stage-candidate.yml"
+    forbid_text(workflow, "$run.name")
+    require_text(workflow, "expectedStageWorkflowPath", "$run.path", "studio-stage-candidate.yml")
 
     require_text(
         workflow,

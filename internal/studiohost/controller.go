@@ -26,6 +26,9 @@ var hubJS string
 //go:embed web/hub.css
 var hubCSS string
 
+//go:embed web/dash-go-showcase-studio.svg
+var hubIconSVG string
+
 type controller struct {
 	app      *App
 	token    string
@@ -59,6 +62,7 @@ func newController(app *App) (*controller, error) {
 	mux.HandleFunc("/", ctl.handleHub)
 	mux.HandleFunc("/assets/hub.js", ctl.handleJS)
 	mux.HandleFunc("/assets/hub.css", ctl.handleCSS)
+	mux.HandleFunc("/assets/dash-go-showcase-studio.svg", ctl.handleHubIcon)
 	mux.HandleFunc("/api/status", ctl.handleStatus)
 	mux.HandleFunc("/api/start-tour", ctl.handleStartTour)
 	mux.HandleFunc("/api/restart-tour", ctl.handleRestartTour)
@@ -100,6 +104,15 @@ func (c *controller) handleCSS(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/css; charset=utf-8")
 	_, _ = w.Write([]byte(hubCSS))
+}
+
+func (c *controller) handleHubIcon(w http.ResponseWriter, r *http.Request) {
+	if !c.authorized(r) || r.Method != http.MethodGet {
+		http.Error(w, "Studio Hub access denied", http.StatusForbidden)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+	_, _ = w.Write([]byte(hubIconSVG))
 }
 
 func (c *controller) handleStatus(w http.ResponseWriter, r *http.Request) {

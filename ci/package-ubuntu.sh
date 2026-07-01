@@ -107,6 +107,9 @@ studio_commit = subprocess.check_output(
     text=True,
 ).strip()
 dashgo_version = str(summary["dashGoVersion"])
+release_package_version = required_string(summary.get("releasePackageVersion"), "staging releasePackageVersion")
+if not re.fullmatch(r"\d+\.\d+\.\d+(?:-(?:test\.\d+|r[1-9]\d*))?", release_package_version):
+    raise SystemExit("staging releasePackageVersion is invalid")
 dashgo_hash = required_sha256(manifest["dashGoSourceSha256"], "manifest Dash-Go source SHA-256")
 
 if origin_argument:
@@ -121,6 +124,7 @@ else:
         "candidateOrigin": "manual",
         "purpose": "manual package candidate only",
         "dashGoVersion": dashgo_version,
+        "releasePackageVersion": release_package_version,
         "dashGoSourceSha256": dashgo_hash,
         "dashGoRelease": None,
     }
@@ -166,6 +170,8 @@ else:
 
 if required_string(origin.get("dashGoVersion"), "dashGoVersion") != dashgo_version:
     raise SystemExit("candidate origin Dash-Go version does not match staging summary")
+if required_string(origin.get("releasePackageVersion"), "releasePackageVersion") != release_package_version:
+    raise SystemExit("candidate origin release package version does not match staging summary")
 if required_sha256(origin.get("dashGoSourceSha256"), "dashGoSourceSha256") != dashgo_hash:
     raise SystemExit("candidate origin Dash-Go source digest does not match staged manifest")
 
@@ -174,6 +180,7 @@ provenance = {
     "purpose": purpose,
     "candidateOrigin": origin_kind,
     "studioVersion": summary["studioVersion"],
+    "releasePackageVersion": release_package_version,
     "dashGoVersion": dashgo_version,
     "studioCommit": studio_commit,
     "dashGoSourceSha256": dashgo_hash,
@@ -190,6 +197,7 @@ provenance = {
 )
 
 print(f"PASS: staged Linux package: {linux_output.name}")
+print(f"PASS: release package version: {release_package_version}")
 print(f"PASS: staged Windows payload: {windows_archive.name}")
 print(f"PASS: candidate origin: {origin_kind}")
 PY

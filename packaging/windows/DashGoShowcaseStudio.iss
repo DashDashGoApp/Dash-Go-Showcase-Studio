@@ -1,6 +1,6 @@
 ; Dash-Go Showcase Studio Windows installer.
 ; Requires Inno Setup 7.0.1 or later, 64-bit compiler edition.
-; The Builder supplies StageDir, StudioVersion, and OutputDir. This file never
+; The Builder supplies StageDir, StudioVersion, ReleasePackageVersion, and OutputDir. This file never
 ; packages a developer workspace or a mutable Studio state directory.
 ; SmokeTest builds use an isolated AppId, exact Builder-owned install/state
 ; directories, and a distinct cleanup contract so they cannot touch a normal
@@ -10,6 +10,9 @@
 #endif
 #ifndef StudioVersion
   #error StudioVersion must be supplied by the Builder.
+#endif
+#ifndef ReleasePackageVersion
+  #error ReleasePackageVersion must be supplied by the Builder.
 #endif
 #ifndef OutputDir
   #error OutputDir must be supplied by the Builder.
@@ -41,7 +44,8 @@ AppId={#ProductionAppId}
 DefaultDirName={localappdata}\Programs\Dash-Go Showcase Studio
 #endif
 AppName={#StudioName}
-AppVersion={#StudioVersion}
+AppVersion={#ReleasePackageVersion}
+AppVerName={#StudioName} for Dash-Go {#ReleasePackageVersion}
 AppPublisher=DashDashGoApp
 AppPublisherURL=https://github.com/DashDashGoApp
 DefaultGroupName=Dash-Go Showcase Studio
@@ -49,7 +53,7 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir={#OutputDir}
-OutputBaseFilename=Dash-Go_Showcase_Studio_{#StudioVersion}_Windows_Setup
+OutputBaseFilename=Dash-Go_Showcase_Studio_{#ReleasePackageVersion}_Windows_Setup
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern

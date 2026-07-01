@@ -75,7 +75,7 @@ def main() -> int:
         'GetEnv("DASHGO_STUDIO_SMOKE_DEFAULT_DIR")', 'GetEnv("DASHGO_STUDIO_SMOKE_STATE_ROOT")',
         "DASHGO_STUDIO_SMOKE_DEFAULT_DIR must be supplied for a SmokeTest build.",
         "DASHGO_STUDIO_SMOKE_STATE_ROOT must be supplied for a SmokeTest build.",
-        "UsePreviousAppDir=no", "SmokeAppId", "[UninstallRun]", "--action purge", "[UninstallDelete]",
+        "UsePreviousAppDir=no", "SmokeAppId", "ReleasePackageVersion", "AppVerName", "[UninstallRun]", "--action purge", "[UninstallDelete]",
         'Type: filesandordirs; Name: "{localappdata}\\Dash-Go Showcase Studio"',
     ):
         if token not in installer:
@@ -123,6 +123,9 @@ def main() -> int:
         "portrait-wall",
         "portrait-tablet",
         "portrait-four-three",
+        "startupShowcaseViewports",
+        "selectStartupViewport",
+        "adaptiveStartupViewport",
     ):
         if token not in host_browser:
             raise CheckError(f"Studio browser viewport contract is missing: {token}")

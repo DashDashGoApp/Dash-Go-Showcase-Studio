@@ -88,6 +88,11 @@ class Context:
         return str(self.manifest["dashGoVersion"])
 
     @property
+    def release_package_version(self) -> str:
+        raw = self.manifest.get("releasePackageVersion", self.version)
+        return str(raw)
+
+    @property
     def dashgo_root(self) -> str:
         return f"dash-go-source-{self.dashgo_version}"
 
@@ -299,6 +304,12 @@ def validate_manifest(ctx: Context) -> None:
         raise BuildFailure("", "Manifest", "studioVersion must use X.Y.Z or X.Y.Z-test.N")
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:-beta\.\d+)?", str(ctx.manifest.get("dashGoVersion", ""))):
         raise BuildFailure("", "Manifest", "dashGoVersion must use X.Y.Z or X.Y.Z-beta.N")
+    if not re.fullmatch(r"\d+\.\d+\.\d+(?:-(?:test\.\d+|r[1-9]\d*))?", ctx.release_package_version):
+        raise BuildFailure("", "Manifest", "releasePackageVersion must use X.Y.Z, X.Y.Z-rN, or X.Y.Z-test.N")
+    if "releasePackageVersion" in ctx.manifest:
+        expected = re.escape(ctx.dashgo_version)
+        if not re.fullmatch(expected + r"(?:-r[1-9]\d*)?", ctx.release_package_version):
+            raise BuildFailure("", "Manifest", "stable releasePackageVersion must equal dashGoVersion or dashGoVersion-rN")
     if ctx.manifest.get("goToolchain") != "1.26.4":
         raise BuildFailure("", "Manifest", "this Builder requires Go 1.26.4")
     if str(ctx.manifest.get("dashGoSourceArchive")) != f"engine/Dash-Go_{ctx.dashgo_version}_source.tar.gz":
@@ -463,7 +474,7 @@ def package_windows_stage(ctx: Context, staged_app: Path, host: Path, cli_host: 
     shutil.copy2(windows_icon, icon_target)
     for name in ("NOTICE.md", "LICENSE", "DASH-GO-THIRD-PARTY-NOTICES.md"):
         shutil.copy2(ctx.source / name, root / name)
-    write_json(root / "STUDIO_RUNTIME.json", {"schema": 1, "studioVersion": ctx.version, "dashGoVersion": ctx.dashgo_version, "fixtureSchema": ctx.manifest["fixtureSchema"], "scenarioCatalog": ctx.manifest["scenarioCatalog"], "platform": "windows-amd64", "builtAt": now_utc()})
+    write_json(root / "STUDIO_RUNTIME.json", {"schema": 1, "studioVersion": ctx.version, "releasePackageVersion": ctx.release_package_version, "dashGoVersion": ctx.dashgo_version, "fixtureSchema": ctx.manifest["fixtureSchema"], "scenarioCatalog": ctx.manifest["scenarioCatalog"], "platform": "windows-amd64", "builtAt": now_utc()})
     if target_server.read_bytes()[:2] != b"MZ" or (root / "dash-go-showcase-studio.exe").read_bytes()[:2] != b"MZ" or (root / "dash-go-showcase-studio-cli.exe").read_bytes()[:2] != b"MZ":
         raise BuildFailure("", "Architecture inspection", "Windows payload does not contain all required PE executables")
     if pe_subsystem(root / "dash-go-showcase-studio.exe") != 2:
@@ -505,7 +516,7 @@ def package_linux(ctx: Context, staged_app: Path, host: Path, engine: Path) -> P
         shutil.copy2(host, app_root / "dash-go-showcase-studio")
         for name in ("NOTICE.md", "LICENSE", "DASH-GO-THIRD-PARTY-NOTICES.md"):
             shutil.copy2(ctx.source / name, app_root / name)
-        write_json(app_root / "STUDIO_RUNTIME.json", {"schema": 1, "studioVersion": ctx.version, "dashGoVersion": ctx.dashgo_version, "fixtureSchema": ctx.manifest["fixtureSchema"], "scenarioCatalog": ctx.manifest["scenarioCatalog"], "platform": "linux-amd64", "builtAt": now_utc()})
+        write_json(app_root / "STUDIO_RUNTIME.json", {"schema": 1, "studioVersion": ctx.version, "releasePackageVersion": ctx.release_package_version, "dashGoVersion": ctx.dashgo_version, "fixtureSchema": ctx.manifest["fixtureSchema"], "scenarioCatalog": ctx.manifest["scenarioCatalog"], "platform": "linux-amd64", "builtAt": now_utc()})
         bin_dir = root / "usr/bin"
         bin_dir.mkdir(parents=True, exist_ok=True)
         (bin_dir / "dash-go-showcase-studio").write_text("#!/bin/sh\nexec /usr/lib/dash-go-showcase-studio/dash-go-showcase-studio \"$@\"\n", encoding="utf-8")
@@ -527,12 +538,12 @@ def package_linux(ctx: Context, staged_app: Path, host: Path, engine: Path) -> P
         (docs / "README.Debian").write_text("Full removal: dash-go-showcase-studio-uninstall --purge\n", encoding="utf-8")
         control = root / "DEBIAN/control"
         control.parent.mkdir(parents=True, exist_ok=True)
-        control.write_text("Package: dash-go-showcase-studio\n" f"Version: {ctx.version}\n" "Section: misc\nPriority: optional\nArchitecture: amd64\n" "Maintainer: DashDashGoApp <opensource@dash-go.invalid>\n" "Description: Dash-Go Showcase Studio\n A local, disposable Dash-Go product showcase with generic fixtures.\n", encoding="utf-8")
+        control.write_text("Package: dash-go-showcase-studio\n" f"Version: {ctx.release_package_version}\n" "Section: misc\nPriority: optional\nArchitecture: amd64\n" "Maintainer: DashDashGoApp <opensource@dash-go.invalid>\n" "Description: Dash-Go Showcase Studio\n A local, disposable Dash-Go product showcase with generic fixtures.\n", encoding="utf-8")
         executable = {Path("usr/lib/dash-go-showcase-studio/dash-go-showcase-studio"), Path("usr/lib/dash-go-showcase-studio/runtime/app/bin/dash-go-showcase-server"), Path("usr/bin/dash-go-showcase-studio"), Path("usr/bin/dash-go-showcase-studio-uninstall")}
         normalize_deb_tree_permissions(root, executable)
         if stat.S_IMODE((root / "DEBIAN").stat().st_mode) != 0o755:
             raise BuildFailure("Build Linux deb", "Package permissions", "DEBIAN control directory must be 0755")
-        deb = native / f"dash-go-showcase-studio_{ctx.version}_amd64.deb"
+        deb = native / f"Dash-Go_Showcase_Studio_{ctx.release_package_version}_Linux_amd64.deb"
         run(ctx, "Build Linux deb", ["dpkg-deb", "--build", "--root-owner-group", str(root), str(deb)], cwd=native, timeout=600)
         run(ctx, "Inspect Linux deb metadata", ["dpkg-deb", "--info", str(deb)], cwd=native, timeout=120)
         contents = run(ctx, "Inspect Linux deb contents", ["dpkg-deb", "--contents", str(deb)], cwd=native, timeout=120)
@@ -582,7 +593,7 @@ def write_failure(ctx: Context, failure: BuildFailure | Exception) -> None:
     log = failure.log if isinstance(failure, BuildFailure) else None
     exit_code = failure.exit_code if isinstance(failure, BuildFailure) else None
     message = safe_text(str(failure), 5000)
-    payload = {"schema": 1, "result": "FAIL", "buildID": ctx.build_id, "studioVersion": ctx.version, "dashGoBaseline": ctx.dashgo_version, "targets": list(ctx.targets), "failedPhase": phase_name, "failureKind": kind, "exitCode": exit_code, "message": message, "events": str(ctx.events_path), "log": str(log) if log else "", "diagnostics": str(ctx.work), "performance": ctx.plan.as_json(), "timings": ctx.timings, "finishedAt": now_utc()}
+    payload = {"schema": 1, "result": "FAIL", "buildID": ctx.build_id, "studioVersion": ctx.version, "releasePackageVersion": ctx.release_package_version, "dashGoBaseline": ctx.dashgo_version, "targets": list(ctx.targets), "failedPhase": phase_name, "failureKind": kind, "exitCode": exit_code, "message": message, "events": str(ctx.events_path), "log": str(log) if log else "", "diagnostics": str(ctx.work), "performance": ctx.plan.as_json(), "timings": ctx.timings, "finishedAt": now_utc()}
     write_json(ctx.work / "failure.json", payload)
     write_json(ctx.work / "timing.json", {
         "schema": 1,
@@ -591,7 +602,7 @@ def write_failure(ctx: Context, failure: BuildFailure | Exception) -> None:
         "totalDurationMs": round((time.monotonic() - ctx.started) * 1000),
         "result": "FAIL",
     })
-    report = ["DASH-GO SHOWCASE STUDIO PACKAGE CANDIDATE FAILURE REPORT", "Schema: 1", "Result: FAIL", f"Build ID: {ctx.build_id}", f"Studio version: {ctx.version}", f"Dash-Go baseline: {ctx.dashgo_version}", f"Targets: {', '.join(ctx.targets)}", f"Performance profile: {ctx.plan.effective}", f"Failed phase: {phase_name}", f"Failure kind: {kind}", f"Exit code: {exit_code if exit_code is not None else 'n/a'}", "", "Observed:", message, "", "Evidence:", f"- events: {ctx.events_path}"]
+    report = ["DASH-GO SHOWCASE STUDIO PACKAGE CANDIDATE FAILURE REPORT", "Schema: 1", "Result: FAIL", f"Build ID: {ctx.build_id}", f"Studio version: {ctx.version}", f"Release package version: {ctx.release_package_version}", f"Dash-Go baseline: {ctx.dashgo_version}", f"Targets: {', '.join(ctx.targets)}", f"Performance profile: {ctx.plan.effective}", f"Failed phase: {phase_name}", f"Failure kind: {kind}", f"Exit code: {exit_code if exit_code is not None else 'n/a'}", "", "Observed:", message, "", "Evidence:", f"- events: {ctx.events_path}"]
     if log:
         report.append(f"- detailed log: {log}")
     report += [f"- diagnostics: {ctx.work}", "", "Next safe action:", "- Do not rerun with a force or bypass switch.", "- Correct the named source, toolchain, fixture, package, or installer issue.", "- Rebuild in a new transaction; no output artifact was published by this run."]
@@ -723,7 +734,7 @@ def main() -> int:
                 (root / "dash-go-showcase-studio").chmod(0o755)
                 run(ctx, "Showcase runtime self-test", [str(root / "dash-go-showcase-studio"), "--action", "self-test", "--scenario", str(ctx.manifest["defaultScenario"]), "--state-root", str(work / "smoke/runtime-state")], cwd=root, timeout=180)
         write_json(work / "timing.json", {"schema": 1, "performance": plan.as_json(), "phases": ctx.timings, "totalDurationMs": round((time.monotonic() - ctx.started) * 1000)})
-        summary = {"schema": 1, "result": "PASS", "buildID": ctx.build_id, "studioVersion": ctx.version, "dashGoVersion": ctx.dashgo_version, "targets": list(ctx.targets), "windowsStage": str(windows_stage) if windows_stage else "", "linuxDeb": str(linux_deb) if linux_deb else "", "events": str(ctx.events_path), "work": str(ctx.work), "performance": plan.as_json(), "timing": str(work / "timing.json"), "finishedAt": now_utc()}
+        summary = {"schema": 1, "result": "PASS", "buildID": ctx.build_id, "studioVersion": ctx.version, "releasePackageVersion": ctx.release_package_version, "dashGoVersion": ctx.dashgo_version, "targets": list(ctx.targets), "windowsStage": str(windows_stage) if windows_stage else "", "linuxDeb": str(linux_deb) if linux_deb else "", "events": str(ctx.events_path), "work": str(ctx.work), "performance": plan.as_json(), "timing": str(work / "timing.json"), "finishedAt": now_utc()}
         write_json(work / "summary.json", summary)
         run_state = json.loads((work / "run.json").read_text(encoding="utf-8"))
         run_state.update({"status": "passed", "finishedAt": now_utc()})

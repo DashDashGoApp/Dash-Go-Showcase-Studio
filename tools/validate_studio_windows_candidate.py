@@ -42,6 +42,8 @@ def main() -> int:
         "STUDIO_RUNTIME.json",
         "windows-amd64",
         "AllowEmptyCollection",
+        "ReleasePackageVersion",
+        "Dash-Go_Showcase_Studio_${ReleasePackageVersion}_Windows_Setup.exe",
         r"assets\branding\dash-go-showcase-studio.ico",
     )
     forbid_text(package_script, "studio.manifest.json")
@@ -73,6 +75,8 @@ def main() -> int:
         "candidate-provenance.json",
         "windows-package-provenance.json",
         "candidateOrigin",
+        "releasePackageVersion",
+        "installerName",
         "manual package candidate only",
         "stable release package candidate only",
         "manual Windows package candidate only",
@@ -111,6 +115,7 @@ def main() -> int:
         "dashgo_source_sha256:",
         "dashgo_tag_commit:",
         "dispatch_nonce:",
+        "release_package_version:",
         "tools/prepare_dashgo_release.py",
         "git worktree add --detach",
     )

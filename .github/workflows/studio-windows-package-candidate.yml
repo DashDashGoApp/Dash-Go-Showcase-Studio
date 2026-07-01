@@ -167,6 +167,10 @@ jobs:
 
           $provenancePurpose = Get-RequiredObjectString -Object $provenance -Name 'purpose' -Label 'purpose'
           $candidateOrigin = Get-RequiredObjectString -Object $provenance -Name 'candidateOrigin' -Label 'candidateOrigin'
+          $releasePackageVersion = Get-RequiredObjectString -Object $provenance -Name 'releasePackageVersion' -Label 'releasePackageVersion'
+          if ($releasePackageVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-(?:test\.[0-9]+|r[1-9][0-9]*))?$') {
+              throw "Stage Candidate provenance has an invalid releasePackageVersion: '$releasePackageVersion'."
+          }
           $allowedPurposes = @('manual package candidate only', 'stable release package candidate only')
           if ($allowedPurposes -notcontains $provenancePurpose) {
               throw "Stage Candidate provenance has an unexpected purpose: '$provenancePurpose'."
@@ -237,6 +241,7 @@ jobs:
           "stage_run_id=$stageRunID" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "candidate_purpose=$provenancePurpose" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "candidate_origin=$candidateOrigin" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "release_package_version=$releasePackageVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Install and verify official Inno Setup 7 x64
         id: inno
@@ -323,6 +328,7 @@ jobs:
           STAGE_RUN_ID: ${{ steps.stage.outputs.stage_run_id }}
           CANDIDATE_PURPOSE: ${{ steps.stage.outputs.candidate_purpose }}
           CANDIDATE_ORIGIN: ${{ steps.stage.outputs.candidate_origin }}
+          RELEASE_PACKAGE_VERSION: ${{ steps.stage.outputs.release_package_version }}
           ISCC_PATH: ${{ steps.inno.outputs.iscc_path }}
           INNO_VERSION: ${{ steps.inno.outputs.inno_version }}
         run: |
@@ -344,6 +350,18 @@ jobs:
 
           $stageProvenancePath = Join-Path $env:CANDIDATE_DIR 'candidate-provenance.json'
           $stageProvenance = Get-Content -LiteralPath $stageProvenancePath -Raw | ConvertFrom-Json
+          $packageSummaryPath = Join-Path $diagnosticsRoot 'windows-package-summary.json'
+          if (-not (Test-Path -LiteralPath $packageSummaryPath -PathType Leaf)) {
+              throw 'Windows package helper did not write windows-package-summary.json.'
+          }
+          $packageSummary = Get-Content -LiteralPath $packageSummaryPath -Raw | ConvertFrom-Json
+          if ([string]$packageSummary.releasePackageVersion -ne $env:RELEASE_PACKAGE_VERSION) {
+              throw 'Windows package helper release package version does not match Stage candidate provenance.'
+          }
+          $expectedInstallerName = 'Dash-Go_Showcase_Studio_{0}_Windows_Setup.exe' -f $env:RELEASE_PACKAGE_VERSION
+          if ([string]$packageSummary.installer -ne $expectedInstallerName) {
+              throw "Windows package helper emitted unexpected installer name: $($packageSummary.installer)."
+          }
           $expectedWindowsPurpose = switch ($env:CANDIDATE_ORIGIN) {
               'manual' { 'manual Windows package candidate only' }
               'dashgo-stable-release' { 'stable release Windows package candidate only' }
@@ -365,6 +383,8 @@ jobs:
               studioCommit = $env:GITHUB_SHA
               stageRunID = $env:STAGE_RUN_ID
               dashGoVersion = [string]$stageProvenance.dashGoVersion
+              releasePackageVersion = $env:RELEASE_PACKAGE_VERSION
+              installerName = [string]$packageSummary.installer
               dashGoSourceSha256 = [string]$stageProvenance.dashGoSourceSha256
               dashGoRelease = $stageProvenance.dashGoRelease
               innoVersion = $env:INNO_VERSION

@@ -56,8 +56,23 @@ jobs:
               throw "Stage Candidate run $stageRunID is not a completed successful run."
           }
 
-          if ($run.event -ne 'workflow_dispatch' -or $run.name -ne 'Studio Stage Candidate') {
+          $expectedStageWorkflowPath = '.github/workflows/studio-stage-candidate.yml'
+
+          if ($run.event -ne 'workflow_dispatch') {
               throw "Run $stageRunID is not a manually dispatched Studio Stage Candidate run."
+          }
+
+          $actualStageWorkflowPath = [string]$run.path
+          $validStageWorkflowPath = (
+              $actualStageWorkflowPath -eq $expectedStageWorkflowPath -or
+              $actualStageWorkflowPath.StartsWith(
+                  "$expectedStageWorkflowPath@",
+                  [System.StringComparison]::Ordinal
+              )
+          )
+
+          if (-not $validStageWorkflowPath) {
+              throw "Run $stageRunID is not the expected Studio Stage Candidate workflow. Path: '$actualStageWorkflowPath'."
           }
 
           if ($run.head_sha -ne $env:GITHUB_SHA) {

@@ -213,10 +213,11 @@ jobs:
           }
 
           $iscc = $isccCandidates[0].FullName
-          $innoVersion = (Get-Item -LiteralPath $iscc).VersionInfo.FileVersion
-          if ($innoVersion -notmatch '^7\.0\.1') {
-              throw "Unexpected Inno Setup compiler version '$innoVersion'; expected 7.0.1-beta."
-          }
+          # ISCC.exe PE FileVersion is 0.0.0.0 in the official beta asset.
+          # Identity is proven by the exact release asset, its GitHub SHA-256
+          # digest, valid Pyrsys B.V. signature, and real compilation below.
+          $innoVersion = '7.0.1-beta'
+          $innoVersionVerification = 'official asset name, GitHub SHA-256 asset digest, valid Pyrsys B.V. Authenticode signature, and successful ISCC package compilation'
 
           $metadataRoot = Join-Path $env:RUNNER_TEMP 'studio-windows-diagnostics'
           New-Item -ItemType Directory -Path $metadataRoot -Force | Out-Null
@@ -227,6 +228,7 @@ jobs:
               assetDigest = $expectedDigest
               compiler = $iscc
               compilerVersion = $innoVersion
+              compilerVersionVerification = $innoVersionVerification
               signatureStatus = [string]$signature.Status
               signer = $signature.SignerCertificate.Subject
           } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $metadataRoot 'inno-setup.json') -Encoding utf8

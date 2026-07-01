@@ -14,11 +14,11 @@ New York, Chicago, Denver, Los Angeles, Anchorage, and Honolulu are available. T
 
 ## Showcase View
 
-A running Studio session has a small **Showcase View** tab. It can change the private browser’s live CSS viewport without changing Windows or Linux display settings:
+A running Studio session has a small **Showcase View** tab. It resizes the private Studio browser window and applies a matching live CSS viewport without changing Windows or Linux display settings:
 
 - Fit Display
-- 1920×1080, 1366×768, 1280×800, and 1024×600 landscape previews
-- 1080×1920, 800×1280, 768×1024, and 600×1024 portrait previews
+- 1920×1080, 1366×768, and 1280×800 landscape previews
+- 1080×1920, 800×1280, and 768×1024 portrait previews
 - Clean View for a Studio-chrome-free demonstration
 
 The selected viewport is session-only and resets to Fit Display next launch.

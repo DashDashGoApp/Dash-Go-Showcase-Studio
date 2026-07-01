@@ -4,9 +4,10 @@ import "testing"
 
 func TestShowcaseViewportCatalogCoversLandscapePortraitAndFit(t *testing.T) {
 	views := allShowcaseViewports()
-	if len(views) != 9 {
-		t.Fatalf("viewport count = %d, want 9", len(views))
+	if len(views) != 7 {
+		t.Fatalf("viewport count = %d, want 7", len(views))
 	}
+
 	want := map[string]struct {
 		width, height int
 		orientation   string
@@ -15,12 +16,11 @@ func TestShowcaseViewportCatalogCoversLandscapePortraitAndFit(t *testing.T) {
 		"wall-landscape":      {1920, 1080, "landscape"},
 		"laptop":              {1366, 768, "landscape"},
 		"wide-tablet":         {1280, 800, "landscape"},
-		"compact-touch":       {1024, 600, "landscape"},
 		"portrait-wall":       {1080, 1920, "portrait"},
 		"portrait-tablet":     {800, 1280, "portrait"},
 		"portrait-four-three": {768, 1024, "portrait"},
-		"compact-portrait":    {600, 1024, "portrait"},
 	}
+
 	for id, expected := range want {
 		got, ok := lookupShowcaseViewport(id)
 		if !ok {
@@ -28,6 +28,12 @@ func TestShowcaseViewportCatalogCoversLandscapePortraitAndFit(t *testing.T) {
 		}
 		if got.Width != expected.width || got.Height != expected.height || got.Orientation != expected.orientation {
 			t.Fatalf("preset %q = %#v, want %dx%d %s", id, got, expected.width, expected.height, expected.orientation)
+		}
+	}
+
+	for _, removed := range []string{"compact-touch", "compact-portrait"} {
+		if _, ok := lookupShowcaseViewport(removed); ok {
+			t.Fatalf("removed viewport preset %q is still present", removed)
 		}
 	}
 }
@@ -46,5 +52,30 @@ func TestParseViewportSupportsFitAndPortrait(t *testing.T) {
 	}
 	if _, err := parseViewport("500x300"); err == nil {
 		t.Fatal("unsafe small viewport was accepted")
+	}
+}
+
+func TestCDPWindowID(t *testing.T) {
+	windowID, err := cdpWindowID(map[string]any{
+		"result": map[string]any{
+			"windowId": float64(42),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if windowID != 42 {
+		t.Fatalf("window ID = %d, want 42", windowID)
+	}
+
+	for _, response := range []map[string]any{
+		{},
+		{"result": map[string]any{}},
+		{"result": map[string]any{"windowId": float64(0)}},
+		{"result": map[string]any{"windowId": float64(1.5)}},
+	} {
+		if _, err := cdpWindowID(response); err == nil {
+			t.Fatalf("invalid window response was accepted: %#v", response)
+		}
 	}
 }

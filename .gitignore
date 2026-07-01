@@ -1,0 +1,11 @@
+/build/
+/dist/
+/.diagnostics/
+*.exe
+*.deb
+*.zip
+*.tar.gz
+!engine/Dash-Go_1.5.2_source.tar.gz
+
+__pycache__/
+*.pyc

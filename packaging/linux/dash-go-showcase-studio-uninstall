@@ -1,0 +1,50 @@
+#!/bin/sh
+# Full-removal helper for the current user's Dash-Go Showcase Studio state.
+# Package-owned files remain the package manager's responsibility; this helper
+# deliberately purges only the invoking user's exact private Studio state before
+# requesting an apt package purge.
+set -eu
+
+host='/usr/lib/dash-go-showcase-studio/dash-go-showcase-studio'
+package='dash-go-showcase-studio'
+
+purge_state() {
+  if [ ! -x "$host" ]; then
+    printf '%s\n' "Dash-Go Showcase Studio host is missing: $host" >&2
+    printf '%s\n' 'Use your package manager to remove residual package files, then remove only the documented Studio state root manually if necessary.' >&2
+    return 1
+  fi
+  "$host" --action purge
+}
+
+purge_package() {
+  if [ "$(id -u)" -eq 0 ]; then
+    exec apt-get purge -y "$package"
+  fi
+  if command -v sudo >/dev/null 2>&1; then
+    exec sudo apt-get purge -y "$package"
+  fi
+  printf '%s\n' 'Package purge needs root privileges. Run: sudo apt-get purge -y dash-go-showcase-studio' >&2
+  return 1
+}
+
+case "${1:-}" in
+  --purge-state)
+    purge_state
+    ;;
+  --purge)
+    purge_state
+    purge_package
+    ;;
+  *)
+    cat <<'USAGE'
+Usage:
+  dash-go-showcase-studio-uninstall --purge-state
+  dash-go-showcase-studio-uninstall --purge
+
+--purge-state removes only the invoking user's exact private Showcase Studio
+state. --purge removes that state first, then purges the Debian package.
+USAGE
+    exit 64
+    ;;
+esac

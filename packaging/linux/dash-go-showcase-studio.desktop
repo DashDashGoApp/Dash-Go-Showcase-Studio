@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Dash-Go Showcase Studio
+Comment=Explore Dash-Go with safe, resettable local household data
+Exec=dash-go-showcase-studio
+Icon=dash-go-showcase-studio
+Terminal=false
+Categories=Utility;Education;
+StartupNotify=true

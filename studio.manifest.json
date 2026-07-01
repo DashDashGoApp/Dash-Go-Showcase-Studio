@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "studioVersion": "2.0.0-test.10",
+  "dashGoVersion": "1.5.2",
+  "dashGoSourceArchive": "engine/Dash-Go_1.5.2_source.tar.gz",
+  "dashGoSourceSha256": "e57ff2d1b747c4ca590cb4b30161902d6a8d78c60b61cfc120df8e00b89347c8",
+  "goToolchain": "1.26.4",
+  "fixtureSchema": 2,
+  "scenarioCatalog": 2,
+  "supportedTargets": [
+    "windows-amd64",
+    "linux-amd64"
+  ],
+  "defaultScenario": "everyday-household",
+  "defaultLocation": "chicago"
+}

@@ -379,9 +379,26 @@ def showcase_tour_guard_view_contract(ctx: Context, app: Path) -> None:
     ):
         if token not in tour:
             raise BuildFailure(phase_name, "Tour contract", f"staged Tour is missing {token!r}")
-    for token in ("/api/viewport", "Clean View", "wall-landscape", "compact-touch", "portrait-wall", "compact-portrait"):
+    for token in (
+        "/api/viewport",
+        "Clean View",
+        "Fit Display",
+        "wall-landscape",
+        "laptop",
+        "wide-tablet",
+        "portrait-wall",
+        "portrait-tablet",
+        "portrait-four-three",
+    ):
         if token not in view:
             raise BuildFailure(phase_name, "Viewport contract", f"staged Showcase View is missing {token!r}")
+    for retired in ("compact-touch", "compact-portrait"):
+        if retired in view:
+            raise BuildFailure(
+                phase_name,
+                "Viewport contract",
+                f"staged Showcase View still exposes retired live preset {retired!r}",
+            )
     for token in ("studio_location_locked", "studio_system_action_locked", "studio_file_import_locked", "studio_external_integration_locked", "studio_security_locked", "showcaseGeocode"):
         if token not in mode:
             raise BuildFailure(phase_name, "Studio guard", f"staged guard is missing {token!r}")

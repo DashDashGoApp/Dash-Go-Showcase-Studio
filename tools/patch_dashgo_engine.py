@@ -723,11 +723,9 @@ def install_showcase_studio_overlay(app: Path) -> None:
     ["landscape","wall-landscape","Wall Display","1920 × 1080"],
     ["landscape","laptop","Common Laptop","1366 × 768"],
     ["landscape","wide-tablet","16:10 Display","1280 × 800"],
-    ["landscape","compact-touch","Compact Touch","1024 × 600"],
     ["portrait","portrait-wall","Portrait Wall","1080 × 1920"],
     ["portrait","portrait-tablet","Portrait Tablet","800 × 1280"],
     ["portrait","portrait-four-three","4:3 Portrait","768 × 1024"],
-    ["portrait","compact-portrait","Compact Portrait","600 × 1024"]
   ];
   const root=document.createElement("aside");root.id="showcase-view";
   root.innerHTML="<button class='showcase-view-toggle' aria-expanded='false'>Showcase View <span>▾</span></button><section class='showcase-view-panel' hidden><div class='showcase-view-head'><strong>Showcase View</strong><button data-clean>Clean View</button></div><div data-groups></div><p class='showcase-view-status'>Fit Display · Fit display</p></section>";

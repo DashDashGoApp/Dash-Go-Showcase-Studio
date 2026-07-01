@@ -183,7 +183,7 @@ if (Test-Path -LiteralPath (Join-Path $SmokeInstallRoot 'dash-go-showcase-studio
     installerSha256 = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash.ToLowerInvariant()
     smokeInstallRoot = $SmokeInstallRoot
     smokeStateRoot = $SmokeStateRoot
-    installedIcon = $InstalledIcon.FullName
+    installedIcon = [System.IO.Path]::GetFileName($InstalledIcon)
 } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $DiagnosticsDir 'windows-package-summary.json') -Encoding utf8
 
 Write-Host "PASS: Windows installer candidate: $InstallerPath"

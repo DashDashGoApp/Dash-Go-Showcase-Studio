@@ -7,5 +7,5 @@
 - The Tour drives one primary Dash-Go surface at a time and cleans temporary Lists/alert previews on every exit path.
 - Studio sessions are synthetic, private, and removed when the browser window closes.
 - Location search uses Studio-safe preview results; final location commits are server-side locked.
-- Showcase View provides session-only live landscape and portrait CSS viewport presets through a private loopback browser connection; it never changes host display settings.
+- Showcase View provides session-only native browser-window sizing with matching live landscape and portrait CSS viewport presets through a private loopback browser connection; it never changes host display settings.
 - Windows packages carry a GUI launcher for normal use and a CLI companion for Builder-only smoke/maintenance actions.

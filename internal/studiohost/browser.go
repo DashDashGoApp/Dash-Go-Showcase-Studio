@@ -48,16 +48,20 @@ type browserSession struct {
 	debugPort int
 }
 
+type cdpPageTargetInfo struct {
+	ID                   string `json:"id"`
+	Type                 string `json:"type"`
+	WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
+}
+
 var showcaseViewports = []viewportSpec{
 	{ID: "fit", Label: "Fit Display", Orientation: "landscape", Fit: true},
 	{ID: "wall-landscape", Label: "Wall Display", Width: 1920, Height: 1080, Orientation: "landscape"},
 	{ID: "laptop", Label: "Common Laptop", Width: 1366, Height: 768, Orientation: "landscape"},
 	{ID: "wide-tablet", Label: "16:10 Display", Width: 1280, Height: 800, Orientation: "landscape"},
-	{ID: "compact-touch", Label: "Compact Touch", Width: 1024, Height: 600, Orientation: "landscape"},
 	{ID: "portrait-wall", Label: "Portrait Wall", Width: 1080, Height: 1920, Orientation: "portrait"},
 	{ID: "portrait-tablet", Label: "Portrait Tablet", Width: 800, Height: 1280, Orientation: "portrait"},
 	{ID: "portrait-four-three", Label: "4:3 Portrait", Width: 768, Height: 1024, Orientation: "portrait"},
-	{ID: "compact-portrait", Label: "Compact Portrait", Width: 600, Height: 1024, Orientation: "portrait"},
 }
 
 func allShowcaseViewports() []viewportSpec {
@@ -190,13 +194,14 @@ func (a *App) launchBrowser(pageURL string) error {
 		a.mu.Unlock()
 	}()
 	if !view.Fit {
-		// Apply the requested CSS viewport after Chromium has made its private
-		// page target available. The short retry keeps startup deterministic
-		// without relying on the operating system's browser-window sizing.
+		// Apply the requested native contents size and matching CSS viewport after
+		// Chromium has made its private page target available. The short retry keeps
+		// startup deterministic while preserving the host display configuration.
 		if _, err := a.applyViewport(view); err != nil && a.options.Trace {
 			fmt.Printf("Showcase viewport setup warning: %v\n", err)
 		}
 	}
+
 	return cmd.Wait()
 }
 
@@ -239,13 +244,44 @@ func applyChromiumViewport(port int, view viewportSpec, result *viewportResult) 
 }
 
 func applyChromiumViewportOnce(port int, view viewportSpec, result *viewportResult) error {
+	windowID, err := cdpBrowserWindowID(port)
+	if err != nil {
+		return fmt.Errorf("find Studio browser window: %w", err)
+	}
+
 	if view.Fit {
 		if _, err := cdpCall(port, "Emulation.clearDeviceMetricsOverride", map[string]any{}); err != nil {
 			return err
 		}
+		if _, err := cdpBrowserCall(port, "Browser.setWindowBounds", map[string]any{
+			"windowId": windowID,
+			"bounds": map[string]any{
+				"windowState": "maximized",
+			},
+		}); err != nil {
+			return fmt.Errorf("maximize Studio browser window: %w", err)
+		}
 		result.Presentation = "Fit display"
 		return nil
 	}
+
+	if _, err := cdpBrowserCall(port, "Browser.setWindowBounds", map[string]any{
+		"windowId": windowID,
+		"bounds": map[string]any{
+			"windowState": "normal",
+		},
+	}); err != nil {
+		return fmt.Errorf("restore Studio browser window: %w", err)
+	}
+
+	if _, err := cdpBrowserCall(port, "Browser.setContentsSize", map[string]any{
+		"windowId": windowID,
+		"width":    view.Width,
+		"height":   view.Height,
+	}); err != nil {
+		return fmt.Errorf("resize Studio browser contents: %w", err)
+	}
+
 	if _, err := cdpCall(port, "Emulation.setDeviceMetricsOverride", map[string]any{
 		"width":             view.Width,
 		"height":            view.Height,
@@ -254,6 +290,7 @@ func applyChromiumViewportOnce(port int, view viewportSpec, result *viewportResu
 	}); err != nil {
 		return err
 	}
+
 	metrics, err := cdpCall(port, "Runtime.evaluate", map[string]any{
 		"expression":    "JSON.stringify({innerWidth:window.innerWidth,innerHeight:window.innerHeight,outerWidth:window.outerWidth,outerHeight:window.outerHeight})",
 		"returnByValue": true,
@@ -261,15 +298,18 @@ func applyChromiumViewportOnce(port int, view viewportSpec, result *viewportResu
 	if err != nil {
 		return err
 	}
+
 	innerWidth, innerHeight, outerWidth, outerHeight := cdpWindowMetrics(metrics)
 	if innerWidth == view.Width && innerHeight == view.Height {
-		result.Presentation = "Exact CSS viewport"
+		result.Presentation = "Native window + exact CSS viewport"
 	} else {
-		result.Presentation = "Scaled preview"
+		result.Presentation = "Native window + scaled preview"
 	}
+
 	if outerWidth > 0 && outerHeight > 0 && (outerWidth < view.Width || outerHeight < view.Height) {
-		result.Presentation = "Scaled preview"
+		result.Presentation = "Native window + scaled preview"
 	}
+
 	return nil
 }
 
@@ -295,29 +335,103 @@ func cdpCall(port int, method string, params map[string]any) (map[string]any, er
 	return cdpWebSocketCall(wsURL, method, params)
 }
 
+func cdpBrowserCall(port int, method string, params map[string]any) (map[string]any, error) {
+	wsURL, err := cdpBrowserWebSocketURL(port)
+	if err != nil {
+		return nil, err
+	}
+	return cdpWebSocketCall(wsURL, method, params)
+}
+
+func cdpBrowserWindowID(port int) (int, error) {
+	target, err := cdpPageTarget(port)
+	if err != nil {
+		return 0, err
+	}
+
+	response, err := cdpBrowserCall(port, "Browser.getWindowForTarget", map[string]any{
+		"targetId": target.ID,
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return cdpWindowID(response)
+}
+
+func cdpWindowID(response map[string]any) (int, error) {
+	result, ok := response["result"].(map[string]any)
+	if !ok {
+		return 0, fmt.Errorf("Chromium DevTools Browser.getWindowForTarget returned no result")
+	}
+
+	value, ok := result["windowId"].(float64)
+	if !ok || value < 1 || value != float64(int(value)) {
+		return 0, fmt.Errorf("Chromium DevTools Browser.getWindowForTarget returned an invalid window ID")
+	}
+
+	return int(value), nil
+}
+
 func cdpPageWebSocketURL(port int) (string, error) {
-	client := &http.Client{Timeout: 1200 * time.Millisecond}
-	response, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/json/list", port))
+	target, err := cdpPageTarget(port)
 	if err != nil {
 		return "", err
 	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Chromium DevTools returned HTTP %d", response.StatusCode)
-	}
-	var targets []struct {
-		Type                 string `json:"type"`
+
+	return target.WebSocketDebuggerURL, nil
+}
+
+func cdpBrowserWebSocketURL(port int) (string, error) {
+	var version struct {
 		WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
 	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 1024*1024)).Decode(&targets); err != nil {
+
+	if err := cdpDevToolsGet(port, "/json/version", &version); err != nil {
 		return "", err
 	}
+
+	if strings.TrimSpace(version.WebSocketDebuggerURL) == "" {
+		return "", fmt.Errorf("Chromium has no browser DevTools target yet")
+	}
+
+	return version.WebSocketDebuggerURL, nil
+}
+
+func cdpPageTarget(port int) (cdpPageTargetInfo, error) {
+	var targets []cdpPageTargetInfo
+
+	if err := cdpDevToolsGet(port, "/json/list", &targets); err != nil {
+		return cdpPageTargetInfo{}, err
+	}
+
 	for _, target := range targets {
-		if target.Type == "page" && target.WebSocketDebuggerURL != "" {
-			return target.WebSocketDebuggerURL, nil
+		if target.Type == "page" && target.ID != "" && target.WebSocketDebuggerURL != "" {
+			return target, nil
 		}
 	}
-	return "", fmt.Errorf("Chromium has no page target yet")
+
+	return cdpPageTargetInfo{}, fmt.Errorf("Chromium has no page target yet")
+}
+
+func cdpDevToolsGet(port int, path string, destination any) error {
+	if port < 1 {
+		return fmt.Errorf("invalid Chromium DevTools port")
+	}
+
+	client := &http.Client{Timeout: 1200 * time.Millisecond}
+
+	response, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d%s", port, path))
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("Chromium DevTools %s returned HTTP %d", path, response.StatusCode)
+	}
+
+	return json.NewDecoder(io.LimitReader(response.Body, 1024*1024)).Decode(destination)
 }
 
 func cdpWebSocketCall(rawURL, method string, params map[string]any) (map[string]any, error) {

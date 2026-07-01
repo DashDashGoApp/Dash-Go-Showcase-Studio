@@ -9,6 +9,6 @@ Studio packages a pinned, staged Dash-Go baseline with fictional local fixtures.
 - **Messages:** ordinary household messages plus Studio-only discovery messages.
 - **Location:** search/preview is allowed with synthetic results; all final location writes are rejected by the server with `studio_location_locked`.
 - **Guardrails:** host/system actions, updates, live external setup, imports/restores, external notifications, security/PIN changes, and host diagnostics are denied at the staged server boundary.
-- **Showcase View:** Fit Display plus four landscape and four portrait CSS viewport presets, all private to the Studio browser session. It never alters the OS display or a real Dash-Go setting.
+- **Showcase View:** Fit Display plus three landscape and three portrait private browser-window and matching CSS viewport presets, all session-only to the Studio browser. It never alters the OS display or a real Dash-Go setting.
 - **Lifecycle:** a Start/Restart Tour creates fresh data; normal Studio close removes session workspace and browser profile.
 - **Windows:** GUI launcher for users; console companion reserved for Builder validation and support actions.

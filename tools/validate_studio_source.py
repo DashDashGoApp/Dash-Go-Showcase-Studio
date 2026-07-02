@@ -62,7 +62,10 @@ def main() -> int:
     for relative in (
         "go.mod", "cmd/dash-go-showcase-studio/main.go", "internal/studiohost/runtime.go", "internal/studiohost/app.go",
         "internal/fixtures/fixtures.go", "tools/patch_dashgo_engine.py", "tools/generate_dashgo_assets.py",
-        "tools/refresh_dashgo_baseline.py", "packaging/windows/DashGoShowcaseStudio.iss",
+        "tools/refresh_dashgo_baseline.py", "tools/prepare_dashgo_release.py",
+        "tools/validate_studio_prepublication_bridge.py", "tools/test_prepare_dashgo_release_prepublication.py",
+        ".github/workflows/studio-prepublish-candidate.yml", "PREPUBLICATION_CANDIDATE_INTAKE.md",
+        "packaging/windows/DashGoShowcaseStudio.iss",
         "packaging/linux/dash-go-showcase-studio-uninstall", "SHOWCASE_STUDIO_2.0_CONTRACT.md", "PORTABLE_RUNTIME_OVERLAY.md",
     ):
         if not (root / relative).is_file():

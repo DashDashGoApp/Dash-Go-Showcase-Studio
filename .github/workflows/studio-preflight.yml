@@ -74,6 +74,13 @@ jobs:
           set -euo pipefail
           python3 tools/validate_studio_prepublication_gate.py --root .
 
+      - name: Verify draft-prepublication bridge contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/validate_studio_prepublication_bridge.py --root .
+          python3 tools/test_prepare_dashgo_release_prepublication.py
+
       - name: Verify stable-release bridge contract
         shell: bash
         run: |

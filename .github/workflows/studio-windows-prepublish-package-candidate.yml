@@ -1,0 +1,499 @@
+name: Studio Windows Prepublication Package Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage_run_id:
+        description: Successful Studio Prepublication Candidate workflow run ID for this exact commit
+        required: true
+        type: string
+      studio_source_commit:
+        description: Exact 40-character Studio commit pinned by Publisher; must equal this run's checked-out commit
+        required: true
+        type: string
+      dashgo_release_id:
+        description: Exact mutable Dash-Go draft release numeric ID proven by the Stage candidate
+        required: true
+        type: string
+      dashgo_version:
+        description: Exact Dash-Go stable version without v, X.Y.Z
+        required: true
+        type: string
+      dashgo_source_asset_id:
+        description: Exact numeric GitHub asset ID for Dash-Go_X.Y.Z_source.tar.gz on the draft release
+        required: true
+        type: string
+      dashgo_source_sha256:
+        description: Exact SHA-256 of the Dash-Go draft source asset
+        required: true
+        type: string
+      dashgo_sha256sums_asset_id:
+        description: Exact numeric GitHub asset ID for SHA256SUMS on the draft release
+        required: true
+        type: string
+      dispatch_nonce:
+        description: Unique Publisher dispatch correlation nonce
+        required: true
+        type: string
+
+run-name: Studio Windows prepublication Dash-Go ${{ inputs.dashgo_version }} ${{ inputs.dispatch_nonce }}
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: studio-windows-prepublish-package-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Build and smoke-test prepublication Windows installer
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out Studio source
+        uses: actions/checkout@v6
+
+      - name: Verify pinned Studio source identity
+        shell: pwsh
+        env:
+          EXPECTED_STUDIO_SOURCE_COMMIT: ${{ inputs.studio_source_commit }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = $env:EXPECTED_STUDIO_SOURCE_COMMIT.Trim().ToLowerInvariant()
+          if ($expected -notmatch '^[0-9a-f]{40}$') {
+              throw 'studio_source_commit must be a 40-character Git commit SHA.'
+          }
+          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($env:GITHUB_SHA -ne $expected -or $actual -ne $expected) {
+              throw "Studio source commit mismatch: expected $expected; GITHUB_SHA=$env:GITHUB_SHA; checked-out=$actual."
+          }
+
+      - name: Validate Windows prepublication workflow source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python --version
+          python tools/validate_studio_windows_prepublication.py --root .
+
+      - name: Verify Prepublication Candidate run and download Windows payload
+        id: stage
+        shell: pwsh
+        env:
+          STAGE_RUN_ID: ${{ inputs.stage_run_id }}
+          DASHGO_RELEASE_ID: ${{ inputs.dashgo_release_id }}
+          DASHGO_VERSION: ${{ inputs.dashgo_version }}
+          DASHGO_SOURCE_ASSET_ID: ${{ inputs.dashgo_source_asset_id }}
+          DASHGO_SOURCE_SHA256: ${{ inputs.dashgo_source_sha256 }}
+          DASHGO_SHA256SUMS_ASSET_ID: ${{ inputs.dashgo_sha256sums_asset_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $stageRunID = $env:STAGE_RUN_ID.Trim()
+          if ($stageRunID -notmatch '^[0-9]+$') {
+              throw "stage_run_id must be a GitHub Actions run ID, got '$stageRunID'."
+          }
+          if ($env:DASHGO_RELEASE_ID.Trim() -notmatch '^[0-9]+$') {
+              throw 'dashgo_release_id must be a numeric GitHub release ID.'
+          }
+          if ($env:DASHGO_SOURCE_ASSET_ID.Trim() -notmatch '^[0-9]+$') {
+              throw 'dashgo_source_asset_id must be a numeric GitHub asset ID.'
+          }
+          if ($env:DASHGO_SHA256SUMS_ASSET_ID.Trim() -notmatch '^[0-9]+$') {
+              throw 'dashgo_sha256sums_asset_id must be a numeric GitHub asset ID.'
+          }
+          if ($env:DASHGO_SOURCE_SHA256.Trim() -notmatch '^[0-9A-Fa-f]{64}$') {
+              throw 'dashgo_source_sha256 must be a SHA-256 hex digest.'
+          }
+
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$stageRunID" |
+              ConvertFrom-Json
+
+          if ($run.status -ne 'completed' -or $run.conclusion -ne 'success') {
+              throw "Prepublication Candidate run $stageRunID is not a completed successful run."
+          }
+
+          $expectedStageWorkflowPath = '.github/workflows/studio-prepublish-candidate.yml'
+
+          if ($run.event -ne 'workflow_dispatch') {
+              throw "Run $stageRunID is not an explicitly dispatched Studio Prepublication Candidate run."
+          }
+
+          $actualStageWorkflowPath = [string]$run.path
+          $validStageWorkflowPath = (
+              $actualStageWorkflowPath -eq $expectedStageWorkflowPath -or
+              $actualStageWorkflowPath.StartsWith(
+                  "$expectedStageWorkflowPath@",
+                  [System.StringComparison]::Ordinal
+              )
+          )
+
+          if (-not $validStageWorkflowPath) {
+              throw "Run $stageRunID is not the expected Studio Prepublication Candidate workflow. Path: '$actualStageWorkflowPath'."
+          }
+
+          if ($run.head_sha -ne $env:GITHUB_SHA) {
+              throw "Prepublication Candidate commit $($run.head_sha) does not match this Windows workflow commit $env:GITHUB_SHA."
+          }
+
+          $artifactResponse = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$stageRunID/artifacts?per_page=100" |
+              ConvertFrom-Json
+
+          $artifactName = "studio-prepublication-candidate-$($run.head_sha)"
+          $matches = @($artifactResponse.artifacts | Where-Object { $_.name -eq $artifactName -and -not $_.expired })
+          if ($matches.Count -ne 1) {
+              throw "Expected exactly one unexpired '$artifactName' artifact on Prepublication Candidate run $stageRunID; found $($matches.Count)."
+          }
+
+          $inputRoot = Join-Path $env:RUNNER_TEMP 'studio-windows-prepublish-input'
+          $artifactZip = Join-Path $inputRoot 'prepublication-candidate.zip'
+          $candidateRoot = Join-Path $inputRoot 'candidate'
+          $payloadRoot = Join-Path $inputRoot 'payload'
+          Remove-Item -LiteralPath $inputRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $candidateRoot, $payloadRoot -Force | Out-Null
+
+          $diagnosticsRoot = Join-Path $env:RUNNER_TEMP 'studio-windows-prepublish-diagnostics'
+          New-Item -ItemType Directory -Path $diagnosticsRoot -Force | Out-Null
+
+          [pscustomobject]@{
+              schema = 1
+              stageRunID = $stageRunID
+              studioCommit = [string]$run.head_sha
+              stageWorkflowPath = $actualStageWorkflowPath
+              artifactID = [string]$matches[0].id
+              artifactName = $artifactName
+          } | ConvertTo-Json -Depth 4 |
+              Set-Content -LiteralPath (Join-Path $diagnosticsRoot 'stage-input.json') -Encoding utf8
+
+          $artifactHeaders = @{
+              'Accept' = 'application/vnd.github+json'
+              'Authorization' = "Bearer $env:GH_TOKEN"
+              'X-GitHub-Api-Version' = '2022-11-28'
+          }
+
+          Invoke-WebRequest `
+              -Uri "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/actions/artifacts/$($matches[0].id)/zip" `
+              -Headers $artifactHeaders `
+              -OutFile $artifactZip `
+              -ErrorAction Stop
+
+          Expand-Archive -LiteralPath $artifactZip -DestinationPath $candidateRoot -Force
+
+          $provenancePath = Join-Path $candidateRoot 'candidate-provenance.json'
+          $windowsArchive = Join-Path $candidateRoot 'windows-stage.tar.gz'
+          if (-not (Test-Path -LiteralPath $provenancePath -PathType Leaf)) {
+              throw 'Downloaded Prepublication Candidate artifact lacks candidate-provenance.json.'
+          }
+          if (-not (Test-Path -LiteralPath $windowsArchive -PathType Leaf)) {
+              throw 'Downloaded Prepublication Candidate artifact lacks windows-stage.tar.gz.'
+          }
+
+          function Get-RequiredObjectProperty {
+              param(
+                  [Parameter(Mandatory = $true)]$Object,
+                  [Parameter(Mandatory = $true)][string]$Name,
+                  [Parameter(Mandatory = $true)][string]$Label
+              )
+
+              $property = $Object.PSObject.Properties[$Name]
+              if ($null -eq $property -or $null -eq $property.Value) {
+                  throw "Prepublication Candidate provenance is missing $Label."
+              }
+              return $property.Value
+          }
+
+          function Get-RequiredObjectString {
+              param(
+                  [Parameter(Mandatory = $true)]$Object,
+                  [Parameter(Mandatory = $true)][string]$Name,
+                  [Parameter(Mandatory = $true)][string]$Label
+              )
+
+              $value = [string](Get-RequiredObjectProperty -Object $Object -Name $Name -Label $Label)
+              if ([string]::IsNullOrWhiteSpace($value)) {
+                  throw "Prepublication Candidate provenance has an empty $Label."
+              }
+              return $value.Trim()
+          }
+
+          function Assert-ExplicitNullProperty {
+              param(
+                  [Parameter(Mandatory = $true)]$Object,
+                  [Parameter(Mandatory = $true)][string]$Name,
+                  [Parameter(Mandatory = $true)][string]$Label
+              )
+
+              $property = $Object.PSObject.Properties[$Name]
+              if ($null -eq $property) {
+                  throw "Prepublication Candidate provenance is missing $Label."
+              }
+              if ($null -ne $property.Value) {
+                  throw "Prepublication Candidate provenance requires a null $Label; found '$($property.Value)'."
+              }
+          }
+
+          $provenance = Get-Content -LiteralPath $provenancePath -Raw | ConvertFrom-Json
+          $provenanceSchema = Get-RequiredObjectString -Object $provenance -Name 'schema' -Label 'schema'
+          if ($provenanceSchema -ne '3') {
+              throw "Prepublication Candidate provenance schema must be 3, found '$provenanceSchema'. Legacy stable or manual candidates are not accepted by this workflow."
+          }
+
+          $provenancePurpose = Get-RequiredObjectString -Object $provenance -Name 'purpose' -Label 'purpose'
+          $candidateOrigin = Get-RequiredObjectString -Object $provenance -Name 'candidateOrigin' -Label 'candidateOrigin'
+          if ($provenancePurpose -ne 'draft prepublication package candidate only') {
+              throw "Prepublication Candidate provenance has an unexpected purpose: '$provenancePurpose'."
+          }
+          if ($candidateOrigin -ne 'dashgo-draft-prepublish-release') {
+              throw "Prepublication Candidate provenance has an unexpected candidate origin: '$candidateOrigin'."
+          }
+
+          $releasePackageVersion = Get-RequiredObjectString -Object $provenance -Name 'releasePackageVersion' -Label 'releasePackageVersion'
+          $provenanceDashGoVersion = Get-RequiredObjectString -Object $provenance -Name 'dashGoVersion' -Label 'dashGoVersion'
+          $expectedVersion = $env:DASHGO_VERSION.Trim()
+          if ($expectedVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
+              throw "dashgo_version must be X.Y.Z, got '$expectedVersion'."
+          }
+          if ($provenanceDashGoVersion -ne $expectedVersion) {
+              throw "Prepublication Candidate provenance Dash-Go version '$provenanceDashGoVersion' does not match dispatched '$expectedVersion'."
+          }
+          if ($releasePackageVersion -ne $provenanceDashGoVersion) {
+              throw 'Prepublication package version must exactly equal the staged Dash-Go version.'
+          }
+
+          $provenanceDashGoSha = Get-RequiredObjectString -Object $provenance -Name 'dashGoSourceSha256' -Label 'dashGoSourceSha256'
+          if ($provenanceDashGoSha.ToLowerInvariant() -ne $env:DASHGO_SOURCE_SHA256.Trim().ToLowerInvariant()) {
+              throw 'Prepublication Candidate provenance Dash-Go source digest does not match the dispatched SHA-256.'
+          }
+
+          $dashGoRelease = Get-RequiredObjectProperty -Object $provenance -Name 'dashGoRelease' -Label 'dashGoRelease'
+          $releaseRepository = Get-RequiredObjectString -Object $dashGoRelease -Name 'repository' -Label 'dashGoRelease.repository'
+          $releaseVersion = Get-RequiredObjectString -Object $dashGoRelease -Name 'version' -Label 'dashGoRelease.version'
+          $releaseTag = Get-RequiredObjectString -Object $dashGoRelease -Name 'releaseTag' -Label 'dashGoRelease.releaseTag'
+          $releaseID = Get-RequiredObjectString -Object $dashGoRelease -Name 'releaseID' -Label 'dashGoRelease.releaseID'
+          $releaseCommit = Get-RequiredObjectString -Object $dashGoRelease -Name 'tagCommit' -Label 'dashGoRelease.tagCommit'
+
+          if ($releaseRepository -ne 'DashDashGoApp/Dash-Go' -or
+              $releaseVersion -ne $expectedVersion -or
+              $releaseTag -ne ('v{0}' -f $expectedVersion)) {
+              throw 'Prepublication candidate provenance does not identify the expected Dash-Go draft release.'
+          }
+          if ($releaseID -ne $env:DASHGO_RELEASE_ID.Trim()) {
+              throw "Prepublication candidate provenance release ID '$releaseID' does not match dispatched '$($env:DASHGO_RELEASE_ID.Trim())'."
+          }
+          if ($dashGoRelease.draft -ne $true -or $dashGoRelease.immutable -ne $false) {
+              throw 'Prepublication candidate provenance does not prove a mutable unpublished Dash-Go draft.'
+          }
+          Assert-ExplicitNullProperty -Object $dashGoRelease -Name 'publishedAt' -Label 'dashGoRelease.publishedAt'
+          if ($releaseCommit -notmatch '^[0-9A-Fa-f]{40}$') {
+              throw 'Prepublication candidate provenance tag commit is invalid.'
+          }
+
+          $sourceAsset = Get-RequiredObjectProperty -Object $dashGoRelease -Name 'sourceAsset' -Label 'dashGoRelease.sourceAsset'
+          $sumsAsset = Get-RequiredObjectProperty -Object $dashGoRelease -Name 'sha256SumsAsset' -Label 'dashGoRelease.sha256SumsAsset'
+          $sourceAssetName = Get-RequiredObjectString -Object $sourceAsset -Name 'name' -Label 'dashGoRelease.sourceAsset.name'
+          $sourceAssetID = Get-RequiredObjectString -Object $sourceAsset -Name 'id' -Label 'dashGoRelease.sourceAsset.id'
+          $sourceAssetSha = Get-RequiredObjectString -Object $sourceAsset -Name 'sha256' -Label 'dashGoRelease.sourceAsset.sha256'
+          $sumsAssetName = Get-RequiredObjectString -Object $sumsAsset -Name 'name' -Label 'dashGoRelease.sha256SumsAsset.name'
+          $sumsAssetID = Get-RequiredObjectString -Object $sumsAsset -Name 'id' -Label 'dashGoRelease.sha256SumsAsset.id'
+          $sumsAssetSha = Get-RequiredObjectString -Object $sumsAsset -Name 'sha256' -Label 'dashGoRelease.sha256SumsAsset.sha256'
+
+          if ($sourceAssetName -ne ('Dash-Go_{0}_source.tar.gz' -f $expectedVersion) -or
+              $sumsAssetName -ne 'SHA256SUMS') {
+              throw 'Prepublication candidate provenance has unexpected Dash-Go draft asset names.'
+          }
+          if ($sourceAssetID -ne $env:DASHGO_SOURCE_ASSET_ID.Trim()) {
+              throw 'Prepublication candidate provenance source asset ID does not match the dispatched asset ID.'
+          }
+          if ($sumsAssetID -ne $env:DASHGO_SHA256SUMS_ASSET_ID.Trim()) {
+              throw 'Prepublication candidate provenance SHA256SUMS asset ID does not match the dispatched asset ID.'
+          }
+          if ($sourceAssetSha -notmatch '^[0-9A-Fa-f]{64}$' -or
+              $sumsAssetSha -notmatch '^[0-9A-Fa-f]{64}$' -or
+              $sourceAssetSha.ToLowerInvariant() -ne $provenanceDashGoSha.ToLowerInvariant()) {
+              throw 'Prepublication candidate provenance has invalid or mismatched Dash-Go SHA-256 evidence.'
+          }
+
+          if ($provenance.studioCommit -ne $env:GITHUB_SHA) {
+              throw "Candidate provenance commit $($provenance.studioCommit) does not match $env:GITHUB_SHA."
+          }
+
+          $expectedWindowsSha = [string]$provenance.artifacts.'windows-stage.tar.gz'
+          $actualWindowsSha = (Get-FileHash -LiteralPath $windowsArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ([string]::IsNullOrWhiteSpace($expectedWindowsSha) -or $actualWindowsSha -ne $expectedWindowsSha.ToLowerInvariant()) {
+              throw 'windows-stage.tar.gz does not match candidate provenance.'
+          }
+
+          tar.exe -xzf $windowsArchive -C $payloadRoot
+          if ($LASTEXITCODE -ne 0) {
+              throw 'Could not extract windows-stage.tar.gz.'
+          }
+
+          $stageDir = Join-Path $payloadRoot 'windows'
+          if (-not (Test-Path -LiteralPath $stageDir -PathType Container)) {
+              throw "The Windows staging archive does not contain the expected windows directory: $stageDir"
+          }
+
+          "stage_dir=$stageDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "candidate_dir=$candidateRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "stage_run_id=$stageRunID" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "release_package_version=$releasePackageVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Install and verify official Inno Setup 7 x64
+        id: inno
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $release = Invoke-RestMethod `
+              -Uri 'https://api.github.com/repos/jrsoftware/issrc/releases/tags/is-7_0_1' `
+              -Headers @{
+                  'Accept' = 'application/vnd.github+json'
+                  'User-Agent' = 'Dash-Go-Showcase-Studio-Windows-Prepublication-Candidate'
+              }
+
+          $asset = @($release.assets | Where-Object { $_.name -eq 'innosetup-7.0.1-beta-x64.exe' })
+          if ($asset.Count -ne 1) {
+              throw 'Official Inno Setup release does not contain exactly one innosetup-7.0.1-beta-x64.exe asset.'
+          }
+
+          $expectedDigest = [string]$asset[0].digest
+          if ($expectedDigest -notmatch '^sha256:[0-9a-fA-F]{64}$') {
+              throw 'Official Inno Setup release did not provide a SHA-256 asset digest.'
+          }
+
+          $innoRoot = Join-Path $env:RUNNER_TEMP 'inno-setup-7'
+          $innoInstaller = Join-Path $env:RUNNER_TEMP 'innosetup-7.0.1-beta-x64.exe'
+          Remove-Item -LiteralPath $innoRoot, $innoInstaller -Recurse -Force -ErrorAction SilentlyContinue
+
+          Invoke-WebRequest -Uri $asset[0].browser_download_url -OutFile $innoInstaller
+
+          $actualDigest = (Get-FileHash -LiteralPath $innoInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualDigest -ne $expectedDigest.Substring(7).ToLowerInvariant()) {
+              throw 'Downloaded Inno Setup installer does not match the official GitHub SHA-256 asset digest.'
+          }
+
+          $signature = Get-AuthenticodeSignature -FilePath $innoInstaller
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Pyrsys B\.V\.') {
+              throw "Inno Setup installer signature verification failed: $($signature.Status); $($signature.SignerCertificate.Subject)"
+          }
+
+          $process = Start-Process `
+              -FilePath $innoInstaller `
+              -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$innoRoot") `
+              -Wait `
+              -PassThru
+          if ($process.ExitCode -ne 0) {
+              throw "Inno Setup installer failed with exit code $($process.ExitCode)."
+          }
+
+          $isccCandidates = @(Get-ChildItem -LiteralPath $innoRoot -Filter 'ISCC.exe' -File -Recurse -ErrorAction Stop)
+          if ($isccCandidates.Count -ne 1) {
+              throw "Expected exactly one ISCC.exe under $innoRoot; found $($isccCandidates.Count)."
+          }
+
+          $iscc = $isccCandidates[0].FullName
+          # ISCC.exe PE FileVersion is 0.0.0.0 in the official beta asset.
+          # Identity is proven by the exact release asset, its GitHub SHA-256
+          # digest, valid Pyrsys B.V. signature, and real compilation below.
+          $innoVersion = '7.0.1-beta'
+          $innoVersionVerification = 'official asset name, GitHub SHA-256 asset digest, valid Pyrsys B.V. Authenticode signature, and successful ISCC package compilation'
+
+          $metadataRoot = Join-Path $env:RUNNER_TEMP 'studio-windows-prepublish-diagnostics'
+          New-Item -ItemType Directory -Path $metadataRoot -Force | Out-Null
+          [pscustomobject]@{
+              schema = 1
+              source = 'official jrsoftware GitHub release is-7_0_1'
+              asset = $asset[0].name
+              assetDigest = $expectedDigest
+              compiler = $iscc
+              compilerVersion = $innoVersion
+              compilerVersionVerification = $innoVersionVerification
+              signatureStatus = [string]$signature.Status
+              signer = $signature.SignerCertificate.Subject
+          } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $metadataRoot 'inno-setup.json') -Encoding utf8
+
+          "iscc_path=$iscc" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "inno_version=$innoVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Build installer and run isolated install smoke
+        shell: pwsh
+        env:
+          STAGE_DIR: ${{ steps.stage.outputs.stage_dir }}
+          CANDIDATE_DIR: ${{ steps.stage.outputs.candidate_dir }}
+          STAGE_RUN_ID: ${{ steps.stage.outputs.stage_run_id }}
+          RELEASE_PACKAGE_VERSION: ${{ steps.stage.outputs.release_package_version }}
+          DISPATCH_NONCE: ${{ inputs.dispatch_nonce }}
+          ISCC_PATH: ${{ steps.inno.outputs.iscc_path }}
+          INNO_VERSION: ${{ steps.inno.outputs.inno_version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $outputRoot = Join-Path $env:RUNNER_TEMP 'studio-windows-prepublish-output'
+          $diagnosticsRoot = Join-Path $env:RUNNER_TEMP 'studio-windows-prepublish-diagnostics'
+          New-Item -ItemType Directory -Path $outputRoot, $diagnosticsRoot -Force | Out-Null
+
+          & .\ci\package-windows.ps1 `
+              -StageDir $env:STAGE_DIR `
+              -IsccPath $env:ISCC_PATH `
+              -OutputDir $outputRoot `
+              -DiagnosticsDir $diagnosticsRoot
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "Windows package helper failed with exit code $LASTEXITCODE."
+          }
+
+          $stageProvenancePath = Join-Path $env:CANDIDATE_DIR 'candidate-provenance.json'
+          $stageProvenance = Get-Content -LiteralPath $stageProvenancePath -Raw | ConvertFrom-Json
+          $packageSummaryPath = Join-Path $diagnosticsRoot 'windows-package-summary.json'
+          if (-not (Test-Path -LiteralPath $packageSummaryPath -PathType Leaf)) {
+              throw 'Windows package helper did not write windows-package-summary.json.'
+          }
+          $packageSummary = Get-Content -LiteralPath $packageSummaryPath -Raw | ConvertFrom-Json
+          if ([string]$packageSummary.releasePackageVersion -ne $env:RELEASE_PACKAGE_VERSION) {
+              throw 'Windows package helper release package version does not match Prepublication candidate provenance.'
+          }
+          $expectedInstallerName = 'Dash-Go_Showcase_Studio_{0}_Windows_Setup.exe' -f $env:RELEASE_PACKAGE_VERSION
+          if ([string]$packageSummary.installer -ne $expectedInstallerName) {
+              throw "Windows package helper emitted unexpected installer name: $($packageSummary.installer)."
+          }
+
+          Copy-Item -LiteralPath $stageProvenancePath `
+              -Destination (Join-Path $outputRoot 'candidate-provenance.json') `
+              -Force
+
+          [pscustomobject]@{
+              schema = 3
+              purpose = 'draft prepublication Windows package candidate only'
+              prepublicationOnly = $true
+              candidateOrigin = [string]$stageProvenance.candidateOrigin
+              studioCommit = $env:GITHUB_SHA
+              stageRunID = $env:STAGE_RUN_ID
+              dispatchNonce = $env:DISPATCH_NONCE
+              dashGoVersion = [string]$stageProvenance.dashGoVersion
+              releasePackageVersion = $env:RELEASE_PACKAGE_VERSION
+              installerName = [string]$packageSummary.installer
+              dashGoSourceSha256 = [string]$stageProvenance.dashGoSourceSha256
+              dashGoRelease = $stageProvenance.dashGoRelease
+              innoVersion = $env:INNO_VERSION
+          } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputRoot 'windows-package-provenance.json') -Encoding utf8
+
+      - name: Upload Windows prepublication package-candidate artifact
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: studio-windows-prepublish-package-candidate-${{ github.sha }}
+          path: ${{ runner.temp }}/studio-windows-prepublish-output/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Windows prepublication package diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: studio-windows-prepublish-package-diagnostics-${{ github.sha }}
+          path: ${{ runner.temp }}/studio-windows-prepublish-diagnostics/
+          if-no-files-found: warn
+          retention-days: 7

@@ -74,12 +74,38 @@ var startupShowcaseViewports = []viewportSpec{
 	{ID: "startup-compact", Label: "Compact Startup", Width: 1024, Height: 600, Orientation: "landscape"},
 }
 
-// selectStartupViewport chooses the largest normal landscape window whose
-// native outer bounds fit inside the browser-reported work area. It never
-// chooses Fit because Fit is an explicit user command that maximizes later.
+// selectStartupViewport chooses the first normal Studio window. It prefers the
+// full 1920x1080 Wall Display whenever the display work area can host it
+// natively. When the display cannot, it sizes a best-fit landscape window to
+// the usable work area instead of dropping to a much smaller preset, capped at
+// 1920x1080 and floored at the compact startup size. Below that floor it falls
+// back to the curated startup presets. It never chooses Fit because Fit is an
+// explicit user command that maximizes later.
 func selectStartupViewport(workWidth, workHeight, frameWidth, frameHeight int) (viewportSpec, bool) {
 	if workWidth < 1 || workHeight < 1 || frameWidth < 0 || frameHeight < 0 {
 		return viewportSpec{}, false
+	}
+	preferred := startupShowcaseViewports[0]
+	if preferred.Width+frameWidth <= workWidth && preferred.Height+frameHeight <= workHeight {
+		return preferred, true
+	}
+	bestWidth := workWidth - frameWidth
+	bestHeight := workHeight - frameHeight
+	if bestWidth > preferred.Width {
+		bestWidth = preferred.Width
+	}
+	if bestHeight > preferred.Height {
+		bestHeight = preferred.Height
+	}
+	compact := startupShowcaseViewports[len(startupShowcaseViewports)-1]
+	if bestWidth >= compact.Width && bestHeight >= compact.Height {
+		return viewportSpec{
+			ID:          "startup-best-fit",
+			Label:       fmt.Sprintf("Best Fit %d \u00d7 %d", bestWidth, bestHeight),
+			Width:       bestWidth,
+			Height:      bestHeight,
+			Orientation: "landscape",
+		}, true
 	}
 	for _, view := range startupShowcaseViewports {
 		if view.Width+frameWidth <= workWidth && view.Height+frameHeight <= workHeight {

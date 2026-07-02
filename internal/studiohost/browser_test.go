@@ -90,21 +90,31 @@ func TestSelectStartupViewportPrefersLargestSafeLandscapePreset(t *testing.T) {
 	}
 }
 
-func TestSelectStartupViewportAccountsForWindowChromeAndFallsBack(t *testing.T) {
+func TestSelectStartupViewportBestFitsWhenWallDisplayCannotFitNatively(t *testing.T) {
 	view, ok := selectStartupViewport(1920, 1080, 16, 80)
 	if !ok {
-		t.Fatal("expected a fallback startup viewport")
+		t.Fatal("expected a best-fit startup viewport")
 	}
-	if view.ID != "laptop" || view.Width != 1366 || view.Height != 768 {
-		t.Fatalf("startup viewport = %#v, want 1366x768 laptop", view)
+	if view.ID != "startup-best-fit" || view.Width != 1904 || view.Height != 1000 || view.Orientation != "landscape" {
+		t.Fatalf("startup viewport = %#v, want 1904x1000 startup-best-fit", view)
 	}
 
-	compact, ok := selectStartupViewport(1366, 768, 16, 80)
+	laptop, ok := selectStartupViewport(1366, 768, 16, 80)
 	if !ok {
-		t.Fatal("expected compact startup fallback")
+		t.Fatal("expected a best-fit startup viewport on a laptop display")
 	}
-	if compact.ID != "startup-compact" || compact.Width != 1024 || compact.Height != 600 {
-		t.Fatalf("compact startup viewport = %#v, want 1024x600", compact)
+	if laptop.ID != "startup-best-fit" || laptop.Width != 1350 || laptop.Height != 688 {
+		t.Fatalf("laptop startup viewport = %#v, want 1350x688 startup-best-fit", laptop)
+	}
+}
+
+func TestSelectStartupViewportNeverExceedsWallDisplay(t *testing.T) {
+	view, ok := selectStartupViewport(2560, 1440, 16, 80)
+	if !ok {
+		t.Fatal("expected a startup viewport")
+	}
+	if view.Width > 1920 || view.Height > 1080 {
+		t.Fatalf("startup viewport exceeds the Wall Display cap: %#v", view)
 	}
 }
 

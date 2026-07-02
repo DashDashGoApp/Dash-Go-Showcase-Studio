@@ -1,6 +1,21 @@
 name: Studio CI Preflight
 
 on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/**'
+      - 'assets/**'
+      - 'ci/**'
+      - 'cmd/**'
+      - 'engine/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'internal/**'
+      - 'packaging/**'
+      - 'studio.manifest.json'
+      - 'tools/**'
   workflow_dispatch:
 
 run-name: Studio source preflight - ${{ github.ref_name }}
@@ -52,6 +67,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/validate_studio_source.py --root .
+
+      - name: Verify prepublication-gate source contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/validate_studio_prepublication_gate.py --root .
 
       - name: Verify stable-release bridge contract
         shell: bash

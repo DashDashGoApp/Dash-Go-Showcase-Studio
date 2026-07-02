@@ -564,7 +564,7 @@ def install_showcase_studio_overlay(app: Path) -> None:
     replace_once(
         navigation,
         '''function bindCtrlSummaryTaps(){
-  document.querySelectorAll("#ctrl details.ctrlsec > summary, #ctrl details.actiondrawer > summary").forEach(s=>{
+  document.querySelectorAll("#ctrl details.ctrlsec > summary").forEach(s=>{
     if(s._fastSummaryBound) return;
     s._fastSummaryBound=true;
     bindTap(s,()=>{
@@ -578,7 +578,7 @@ def install_showcase_studio_overlay(app: Path) -> None:
   // Native summary activation owns open/close. The former custom bindTap handler
   // raced the browser click path in desktop Chromium and could require multiple
   // attempts to expand a Dashboard Control card.
-  document.querySelectorAll("#ctrl details.ctrlsec > summary, #ctrl details.actiondrawer > summary").forEach(s=>{
+  document.querySelectorAll("#ctrl details.ctrlsec > summary").forEach(s=>{
     if(s._fastSummaryBound) return;
     s._fastSummaryBound=true;
   });

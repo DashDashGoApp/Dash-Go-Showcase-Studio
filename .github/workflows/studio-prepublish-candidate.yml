@@ -1,0 +1,194 @@
+name: Studio Prepublication Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      dashgo_release_id:
+        description: Exact mutable Dash-Go draft release numeric ID
+        required: true
+        type: string
+      dashgo_release_tag:
+        description: Exact Dash-Go draft release tag, vX.Y.Z
+        required: true
+        type: string
+      dashgo_version:
+        description: Exact Dash-Go stable version without v, X.Y.Z
+        required: true
+        type: string
+      studio_source_commit:
+        description: Exact 40-character Studio commit pinned by Publisher; must equal this run's checked-out commit
+        required: true
+        type: string
+      dashgo_source_asset_id:
+        description: Exact numeric GitHub asset ID for Dash-Go_X.Y.Z_source.tar.gz on the draft release
+        required: true
+        type: string
+      dashgo_source_sha256:
+        description: Exact SHA-256 of the Dash-Go draft source asset
+        required: true
+        type: string
+      dashgo_sha256sums_asset_id:
+        description: Exact numeric GitHub asset ID for SHA256SUMS on the draft release
+        required: true
+        type: string
+      dashgo_tag_commit:
+        description: Exact commit resolved by the Dash-Go draft release tag
+        required: true
+        type: string
+      dispatch_nonce:
+        description: Unique Publisher dispatch correlation nonce
+        required: true
+        type: string
+      release_package_version:
+        description: Must exactly equal the Dash-Go version for an unpublished stable candidate
+        required: true
+        type: string
+
+run-name: Studio prepublication Dash-Go ${{ inputs.dashgo_version }} ${{ inputs.dispatch_nonce }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-prepublication-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    name: Verify draft source and stage Linux plus Windows payloads
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out Studio source
+        uses: actions/checkout@v6
+
+      - name: Verify pinned Studio source identity
+        shell: bash
+        env:
+          EXPECTED_STUDIO_SOURCE_COMMIT: ${{ inputs.studio_source_commit }}
+        run: |
+          set -euo pipefail
+          expected="$(printf '%s' "$EXPECTED_STUDIO_SOURCE_COMMIT" | tr '[:upper:]' '[:lower:]')"
+          actual="$(git rev-parse HEAD)"
+          if [[ ! "$expected" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "studio_source_commit must be a 40-character Git commit SHA." >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_SHA" != "$expected" || "$actual" != "$expected" ]]; then
+            echo "Studio source commit mismatch: expected $expected; GITHUB_SHA=$GITHUB_SHA; checked-out=$actual." >&2
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Set up pinned Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.4'
+          check-latest: false
+          cache: false
+
+      - name: Show tool versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 --version
+          node --version
+          go version
+          dpkg-deb --version | head -n 1
+
+      - name: Validate prepublication bridge contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/validate_studio_prepublication_bridge.py --root .
+          python3 tools/test_prepare_dashgo_release_prepublication.py
+
+      - name: Materialize isolated candidate source from Dash-Go draft release
+        id: candidate
+        shell: bash
+        env:
+          DASHGO_RELEASE_READ_TOKEN: ${{ secrets.DASHGO_RELEASE_READ_TOKEN }}
+          DASHGO_RELEASE_ID: ${{ inputs.dashgo_release_id }}
+          DASHGO_RELEASE_TAG: ${{ inputs.dashgo_release_tag }}
+          DASHGO_VERSION: ${{ inputs.dashgo_version }}
+          DASHGO_SOURCE_ASSET_ID: ${{ inputs.dashgo_source_asset_id }}
+          DASHGO_SOURCE_SHA256: ${{ inputs.dashgo_source_sha256 }}
+          DASHGO_SHA256SUMS_ASSET_ID: ${{ inputs.dashgo_sha256sums_asset_id }}
+          DASHGO_TAG_COMMIT: ${{ inputs.dashgo_tag_commit }}
+          DISPATCH_NONCE: ${{ inputs.dispatch_nonce }}
+          RELEASE_PACKAGE_VERSION: ${{ inputs.release_package_version }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DASHGO_RELEASE_READ_TOKEN:-}" ]]; then
+            echo "DASHGO_RELEASE_READ_TOKEN is required to read the Dash-Go draft release." >&2
+            exit 1
+          fi
+          export GITHUB_TOKEN="$DASHGO_RELEASE_READ_TOKEN"
+          source_root="$RUNNER_TEMP/studio-prepublication-source"
+          origin_path="$RUNNER_TEMP/studio-prepublication-origin.json"
+          git worktree add --detach "$source_root" "$GITHUB_SHA"
+
+          python3 tools/prepare_dashgo_release.py \
+            --source-root "$source_root" \
+            --origin-path "$origin_path" \
+            --candidate-origin dashgo-draft-prepublish-release \
+            --dashgo-release-id "$DASHGO_RELEASE_ID" \
+            --dashgo-release-tag "$DASHGO_RELEASE_TAG" \
+            --dashgo-version "$DASHGO_VERSION" \
+            --dashgo-source-asset-id "$DASHGO_SOURCE_ASSET_ID" \
+            --dashgo-source-sha256 "$DASHGO_SOURCE_SHA256" \
+            --dashgo-sha256sums-asset-id "$DASHGO_SHA256SUMS_ASSET_ID" \
+            --dashgo-tag-commit "$DASHGO_TAG_COMMIT" \
+            --dispatch-nonce "$DISPATCH_NONCE" \
+            --release-package-version "$RELEASE_PACKAGE_VERSION"
+
+          printf 'source_root=%s\n' "$source_root" >> "$GITHUB_OUTPUT"
+          printf 'origin_path=%s\n' "$origin_path" >> "$GITHUB_OUTPUT"
+
+      - name: Build staged prepublication package candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_source="${{ steps.candidate.outputs.source_root }}"
+          candidate_origin="${{ steps.candidate.outputs.origin_path }}"
+          chmod +x "$candidate_source/ci/package-ubuntu.sh"
+          "$candidate_source/ci/package-ubuntu.sh" \
+            "$RUNNER_TEMP/studio-prepublication-stage" \
+            "$RUNNER_TEMP/studio-prepublication-artifacts" \
+            "$candidate_origin"
+          cp "$candidate_origin" "$RUNNER_TEMP/studio-prepublication-stage/candidate-origin-input.json"
+
+      - name: Upload prepublication package-candidate artifacts
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: studio-prepublication-candidate-${{ github.sha }}
+          path: ${{ runner.temp }}/studio-prepublication-artifacts/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload prepublication staging diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: studio-prepublication-diagnostics-${{ github.sha }}
+          path: ${{ runner.temp }}/studio-prepublication-stage/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Remove isolated candidate source
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree remove --force "$RUNNER_TEMP/studio-prepublication-source" || rm -rf "$RUNNER_TEMP/studio-prepublication-source"

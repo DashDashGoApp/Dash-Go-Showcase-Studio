@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Materialize a fail-closed Dash-Go baseline for a Studio Stage candidate."""
+"""Materialize a fail-closed Dash-Go baseline for a Studio package candidate."""
 from __future__ import annotations
 
 import argparse
@@ -22,6 +22,7 @@ API_VERSION = "2022-11-28"
 USER_AGENT = "Dash-Go-Showcase-Studio-Stage"
 MANUAL_PURPOSE = "manual package candidate only"
 STABLE_PURPOSE = "stable release package candidate only"
+DRAFT_PREPUBLICATION_PURPOSE = "draft prepublication package candidate only"
 
 
 class ReleaseInputError(RuntimeError):
@@ -40,6 +41,19 @@ def require_string(value: object, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ReleaseInputError(f"missing {label}")
     return value.strip()
+
+
+def require_positive_int(value: object, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ReleaseInputError(f"{label} must be a positive integer")
+    return value
+
+
+def require_positive_int_string(value: object, label: str) -> int:
+    raw = require_string(value, label)
+    if not re.fullmatch(r"[1-9][0-9]*", raw):
+        raise ReleaseInputError(f"{label} must be a positive integer")
+    return int(raw)
 
 
 def require_sha256(value: str, label: str) -> str:
@@ -101,7 +115,7 @@ def download(url: str, target: Path) -> None:
         raise ReleaseInputError(f"could not download release asset {url}: {exc}") from exc
 
 
-def release_asset(release: dict, name: str) -> dict:
+def release_asset(release: dict, name: str, *, download_key: str = "browser_download_url") -> dict:
     assets = release.get("assets")
     if not isinstance(assets, list):
         raise ReleaseInputError("GitHub release metadata has no asset list")
@@ -111,12 +125,14 @@ def release_asset(release: dict, name: str) -> dict:
     asset = matches[0]
     if asset.get("state") != "uploaded":
         raise ReleaseInputError(f"release asset {name} is not uploaded")
-    if not isinstance(asset.get("browser_download_url"), str) or not asset["browser_download_url"].startswith("https://"):
-        raise ReleaseInputError(f"release asset {name} lacks a safe HTTPS download URL")
+    asset_url = asset.get(download_key)
+    if not isinstance(asset_url, str) or not asset_url.startswith("https://"):
+        raise ReleaseInputError(f"release asset {name} lacks a safe HTTPS {download_key}")
     digest = require_string(asset.get("digest"), f"release asset {name} digest")
     if not digest.startswith("sha256:"):
         raise ReleaseInputError(f"release asset {name} must provide a SHA-256 digest")
     require_sha256(digest.removeprefix("sha256:"), f"release asset {name} digest")
+    require_positive_int(asset.get("id"), f"release asset {name} id")
     return asset
 
 
@@ -193,6 +209,13 @@ def require_release_package_version(value: str, dashgo_version: str) -> str:
     return package_version
 
 
+def require_prepublication_package_version(value: str, dashgo_version: str) -> str:
+    package_version = require_string(value, "prepublication release package version")
+    if package_version != dashgo_version:
+        raise ReleaseInputError("prepublication release package version must exactly equal the Dash-Go stable version")
+    return package_version
+
+
 def update_manifest(source_root: Path, version: str, archive_hash: str, release_package_version: str) -> None:
     manifest_path = source_root / "studio.manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -215,14 +238,61 @@ def write_json(path: Path, value: object) -> None:
     os.replace(stage, path)
 
 
+def materialize_source_archive(
+    *,
+    source_root: Path,
+    version: str,
+    source_name: str,
+    source_digest: str,
+    sums_digest: str,
+    source_url: str,
+    sums_url: str,
+) -> None:
+    archive_target = source_root / "engine" / source_name
+    archive_target.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="dashgo-studio-release-") as temp_name:
+        temp = Path(temp_name)
+        downloaded_source = temp / source_name
+        downloaded_sums = temp / "SHA256SUMS"
+        download(source_url, downloaded_source)
+        download(sums_url, downloaded_sums)
+        if sha256(downloaded_source) != source_digest:
+            raise ReleaseInputError("downloaded Dash-Go source archive does not match GitHub asset digest")
+        if sha256(downloaded_sums) != sums_digest:
+            raise ReleaseInputError("downloaded SHA256SUMS does not match GitHub asset digest")
+        if parse_sums(downloaded_sums, source_name) != source_digest:
+            raise ReleaseInputError("SHA256SUMS source row does not match the GitHub source asset digest")
+        validate_archive(downloaded_source, version)
+        stage = archive_target.with_name("." + archive_target.name + ".stage")
+        shutil.copy2(downloaded_source, stage)
+        if sha256(stage) != source_digest:
+            stage.unlink(missing_ok=True)
+            raise ReleaseInputError("Dash-Go source archive changed while staging the Studio baseline")
+        os.replace(stage, archive_target)
+
+
+def require_api_url(value: object, label: str) -> str:
+    url = require_string(value, label)
+    if not url.startswith("https://"):
+        raise ReleaseInputError(f"{label} must use HTTPS")
+    return url
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-root", type=Path, required=True)
     parser.add_argument("--origin-path", type=Path, required=True)
-    parser.add_argument("--candidate-origin", choices=("manual", "dashgo-stable-release"), required=True)
+    parser.add_argument(
+        "--candidate-origin",
+        choices=("manual", "dashgo-stable-release", "dashgo-draft-prepublish-release"),
+        required=True,
+    )
+    parser.add_argument("--dashgo-release-id", default="")
     parser.add_argument("--dashgo-release-tag", default="")
     parser.add_argument("--dashgo-version", default="")
+    parser.add_argument("--dashgo-source-asset-id", default="")
     parser.add_argument("--dashgo-source-sha256", default="")
+    parser.add_argument("--dashgo-sha256sums-asset-id", default="")
     parser.add_argument("--dashgo-tag-commit", default="")
     parser.add_argument("--dispatch-nonce", default="")
     parser.add_argument("--release-package-version", default="")
@@ -240,8 +310,20 @@ def main() -> int:
         "studioSourceRoot": str(source_root),
     }
 
+    all_release_fields = (
+        args.dashgo_release_id,
+        args.dashgo_release_tag,
+        args.dashgo_version,
+        args.dashgo_source_asset_id,
+        args.dashgo_source_sha256,
+        args.dashgo_sha256sums_asset_id,
+        args.dashgo_tag_commit,
+        args.dispatch_nonce,
+        args.release_package_version,
+    )
+
     if args.candidate_origin == "manual":
-        if any((args.dashgo_release_tag, args.dashgo_version, args.dashgo_source_sha256, args.dashgo_tag_commit, args.dispatch_nonce, args.release_package_version)):
+        if any(all_release_fields):
             raise ReleaseInputError("manual Stage input must not supply Dash-Go release bridge fields")
         manifest = json.loads((source_root / "studio.manifest.json").read_text(encoding="utf-8"))
         common.update(
@@ -262,7 +344,6 @@ def main() -> int:
     expected_source_hash = require_sha256(require_string(args.dashgo_source_sha256, "Dash-Go source SHA-256"), "Dash-Go source SHA-256")
     expected_tag_commit = require_commit(require_string(args.dashgo_tag_commit, "Dash-Go tag commit"), "Dash-Go tag commit")
     nonce = require_string(args.dispatch_nonce, "dispatch nonce")
-    release_package_version = require_release_package_version(args.release_package_version, version)
     if tag != f"v{version}":
         raise ReleaseInputError("Dash-Go release tag must exactly match the stable version")
     if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._-]{7,127}", nonce):
@@ -271,51 +352,109 @@ def main() -> int:
     api = args.github_api_url.rstrip("/")
     if not api.startswith("https://"):
         raise ReleaseInputError("GitHub API URL must use HTTPS")
-    release = get_json(f"{api}/repos/{DASHGO_REPOSITORY}/releases/tags/{urllib.parse.quote(tag, safe='')}")
-    if release.get("tag_name") != tag or release.get("draft") or release.get("prerelease") or release.get("immutable") is not True:
-        raise ReleaseInputError("Dash-Go release is not the expected published immutable stable release")
-    release_id = release.get("id")
-    published_at = release.get("published_at")
-    if not isinstance(release_id, int) or release_id <= 0 or not isinstance(published_at, str) or not published_at.strip():
-        raise ReleaseInputError("Dash-Go release metadata lacks an immutable published identity")
+
+    source_name = f"Dash-Go_{version}_source.tar.gz"
+
+    if args.candidate_origin == "dashgo-stable-release":
+        if args.dashgo_release_id or args.dashgo_source_asset_id or args.dashgo_sha256sums_asset_id:
+            raise ReleaseInputError("stable-release Stage input must not supply draft prepublication asset identity fields")
+        release_package_version = require_release_package_version(args.release_package_version, version)
+        release = get_json(f"{api}/repos/{DASHGO_REPOSITORY}/releases/tags/{urllib.parse.quote(tag, safe='')}")
+        if release.get("tag_name") != tag or release.get("draft") or release.get("prerelease") or release.get("immutable") is not True:
+            raise ReleaseInputError("Dash-Go release is not the expected published immutable stable release")
+        release_id = require_positive_int(release.get("id"), "immutable Dash-Go release id")
+        published_at = release.get("published_at")
+        if not isinstance(published_at, str) or not published_at.strip():
+            raise ReleaseInputError("Dash-Go release metadata lacks an immutable published identity")
+        resolved_commit = resolve_tag_commit(api, tag)
+        if resolved_commit != expected_tag_commit:
+            raise ReleaseInputError(f"Dash-Go tag commit mismatch: expected {expected_tag_commit}, found {resolved_commit}")
+        source_asset = release_asset(release, source_name)
+        sums_asset = release_asset(release, "SHA256SUMS")
+        source_digest = require_sha256(str(source_asset["digest"]).split(":", 1)[1], "published source digest")
+        sums_digest = require_sha256(str(sums_asset["digest"]).split(":", 1)[1], "published SHA256SUMS digest")
+        if source_digest != expected_source_hash:
+            raise ReleaseInputError(f"publisher source digest mismatch: expected {expected_source_hash}, GitHub reports {source_digest}")
+        materialize_source_archive(
+            source_root=source_root,
+            version=version,
+            source_name=source_name,
+            source_digest=source_digest,
+            sums_digest=sums_digest,
+            source_url=require_api_url(source_asset.get("browser_download_url"), "published source browser download URL"),
+            sums_url=require_api_url(sums_asset.get("browser_download_url"), "published SHA256SUMS browser download URL"),
+        )
+        update_manifest(source_root, version, source_digest, release_package_version)
+        common.update(
+            {
+                "purpose": STABLE_PURPOSE,
+                "dashGoVersion": version,
+                "releasePackageVersion": release_package_version,
+                "dashGoSourceSha256": source_digest,
+                "dashGoRelease": {
+                    "repository": DASHGO_REPOSITORY,
+                    "version": version,
+                    "releaseTag": tag,
+                    "releaseID": release_id,
+                    "publishedAt": published_at,
+                    "immutable": True,
+                    "tagCommit": resolved_commit,
+                    "dispatchNonce": nonce,
+                    "sourceAsset": {
+                        "name": source_name,
+                        "id": require_positive_int(source_asset.get("id"), "published source asset id"),
+                        "sha256": source_digest,
+                    },
+                    "sha256SumsAsset": {
+                        "name": "SHA256SUMS",
+                        "id": require_positive_int(sums_asset.get("id"), "published SHA256SUMS asset id"),
+                        "sha256": sums_digest,
+                    },
+                },
+            }
+        )
+        write_json(origin_path, common)
+        print(f"STUDIO CANDIDATE INPUT: immutable Dash-Go stable release {tag} ({source_digest})")
+        return 0
+
+    release_id = require_positive_int_string(args.dashgo_release_id, "Dash-Go draft release id")
+    expected_source_asset_id = require_positive_int_string(args.dashgo_source_asset_id, "Dash-Go draft source asset id")
+    expected_sums_asset_id = require_positive_int_string(args.dashgo_sha256sums_asset_id, "Dash-Go draft SHA256SUMS asset id")
+    release_package_version = require_prepublication_package_version(args.release_package_version, version)
+    release = get_json(f"{api}/repos/{DASHGO_REPOSITORY}/releases/{release_id}")
+    if require_positive_int(release.get("id"), "Dash-Go draft release metadata id") != release_id:
+        raise ReleaseInputError("Dash-Go draft release metadata does not match the requested release id")
+    if release.get("tag_name") != tag or release.get("draft") is not True or release.get("prerelease") or release.get("immutable") is not False:
+        raise ReleaseInputError("Dash-Go release is not the expected mutable draft stable release")
+    if release.get("published_at") is not None:
+        raise ReleaseInputError("Dash-Go draft release must not have a published_at timestamp")
     resolved_commit = resolve_tag_commit(api, tag)
     if resolved_commit != expected_tag_commit:
         raise ReleaseInputError(f"Dash-Go tag commit mismatch: expected {expected_tag_commit}, found {resolved_commit}")
-
-    source_name = f"Dash-Go_{version}_source.tar.gz"
-    source_asset = release_asset(release, source_name)
-    sums_asset = release_asset(release, "SHA256SUMS")
-    source_digest = require_sha256(str(source_asset["digest"]).split(":", 1)[1], "published source digest")
-    sums_digest = require_sha256(str(sums_asset["digest"]).split(":", 1)[1], "published SHA256SUMS digest")
+    source_asset = release_asset(release, source_name, download_key="url")
+    sums_asset = release_asset(release, "SHA256SUMS", download_key="url")
+    if require_positive_int(source_asset.get("id"), "Dash-Go draft source asset id") != expected_source_asset_id:
+        raise ReleaseInputError("Dash-Go draft source asset identity mismatch")
+    if require_positive_int(sums_asset.get("id"), "Dash-Go draft SHA256SUMS asset id") != expected_sums_asset_id:
+        raise ReleaseInputError("Dash-Go draft SHA256SUMS asset identity mismatch")
+    source_digest = require_sha256(str(source_asset["digest"]).split(":", 1)[1], "draft source digest")
+    sums_digest = require_sha256(str(sums_asset["digest"]).split(":", 1)[1], "draft SHA256SUMS digest")
     if source_digest != expected_source_hash:
-        raise ReleaseInputError(f"publisher source digest mismatch: expected {expected_source_hash}, GitHub reports {source_digest}")
-
-    archive_target = source_root / "engine" / source_name
-    archive_target.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="dashgo-studio-release-") as temp_name:
-        temp = Path(temp_name)
-        downloaded_source = temp / source_name
-        downloaded_sums = temp / "SHA256SUMS"
-        download(str(source_asset["browser_download_url"]), downloaded_source)
-        download(str(sums_asset["browser_download_url"]), downloaded_sums)
-        if sha256(downloaded_source) != source_digest:
-            raise ReleaseInputError("downloaded Dash-Go source archive does not match GitHub asset digest")
-        if sha256(downloaded_sums) != sums_digest:
-            raise ReleaseInputError("downloaded SHA256SUMS does not match GitHub asset digest")
-        if parse_sums(downloaded_sums, source_name) != source_digest:
-            raise ReleaseInputError("SHA256SUMS source row does not match the GitHub source asset digest")
-        validate_archive(downloaded_source, version)
-        stage = archive_target.with_name("." + archive_target.name + ".stage")
-        shutil.copy2(downloaded_source, stage)
-        if sha256(stage) != source_digest:
-            stage.unlink(missing_ok=True)
-            raise ReleaseInputError("Dash-Go source archive changed while staging the Studio baseline")
-        os.replace(stage, archive_target)
-
+        raise ReleaseInputError(f"draft source digest mismatch: expected {expected_source_hash}, GitHub reports {source_digest}")
+    materialize_source_archive(
+        source_root=source_root,
+        version=version,
+        source_name=source_name,
+        source_digest=source_digest,
+        sums_digest=sums_digest,
+        source_url=require_api_url(source_asset.get("url"), "draft source asset API URL"),
+        sums_url=require_api_url(sums_asset.get("url"), "draft SHA256SUMS asset API URL"),
+    )
     update_manifest(source_root, version, source_digest, release_package_version)
     common.update(
         {
-            "purpose": STABLE_PURPOSE,
+            "schema": 2,
+            "purpose": DRAFT_PREPUBLICATION_PURPOSE,
             "dashGoVersion": version,
             "releasePackageVersion": release_package_version,
             "dashGoSourceSha256": source_digest,
@@ -324,25 +463,26 @@ def main() -> int:
                 "version": version,
                 "releaseTag": tag,
                 "releaseID": release_id,
-                "publishedAt": published_at,
-                "immutable": True,
+                "draft": True,
+                "publishedAt": None,
+                "immutable": False,
                 "tagCommit": resolved_commit,
                 "dispatchNonce": nonce,
                 "sourceAsset": {
                     "name": source_name,
-                    "id": source_asset.get("id"),
+                    "id": expected_source_asset_id,
                     "sha256": source_digest,
                 },
                 "sha256SumsAsset": {
                     "name": "SHA256SUMS",
-                    "id": sums_asset.get("id"),
+                    "id": expected_sums_asset_id,
                     "sha256": sums_digest,
                 },
             },
         }
     )
     write_json(origin_path, common)
-    print(f"STUDIO CANDIDATE INPUT: immutable Dash-Go stable release {tag} ({source_digest})")
+    print(f"STUDIO CANDIDATE INPUT: Dash-Go draft prepublication release {tag} ({source_digest})")
     return 0
 
 

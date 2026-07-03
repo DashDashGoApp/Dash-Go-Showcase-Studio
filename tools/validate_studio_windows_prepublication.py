@@ -38,6 +38,8 @@ def main() -> int:
     package_script = root / "ci" / "package-windows.ps1"
     stage_packager = root / "ci" / "stage-package.py"
     inno_script = root / "packaging" / "windows" / "DashGoShowcaseStudio.iss"
+    runtime = root / "internal" / "studiohost" / "runtime.go"
+    patcher = root / "tools" / "patch_dashgo_engine.py"
 
     require_text(
         workflow,
@@ -154,6 +156,11 @@ def main() -> int:
         "installed curated Windows payload manifest",
         "Installed Studio payload manifest does not match the curated stage manifest.",
         "$_.relativePath -ne $script:PayloadManifestName",
+        "Studio self-test created an executable or script below its mutable state root.",
+        "Studio self-test modified the immutable installed payload.",
+        "$PostSelfTestInstalledPayloadFileCount = Test-InstalledCuratedPayload",
+        "postSelfTestInstalledPayloadFileCount = $PostSelfTestInstalledPayloadFileCount",
+        "mutableStateExecutableCount = $MutableStateExecutables.Count",
     )
     require_text(
         inno_script,
@@ -177,6 +184,28 @@ def main() -> int:
         "payloadManifestSha256",
         "payloadFileCount",
         "curated Windows payload contract",
+    )
+
+    require_text(
+        runtime,
+        "DASHGO_SHOWCASE_DATA_ROOT",
+        "a.paths.runtimeServer",
+        "cmd.Dir = a.paths.runtimeApp",
+        "a.paths.scenarioData",
+    )
+    for retired in ("workspaceApp", "workspaceHome", "workspaceRoot", ".workspace-stage-", "copyTree(a.paths.runtimeApp"):
+        forbid_text(runtime, retired)
+    require_text(
+        patcher,
+        "DASHGO_SHOWCASE_DATA_ROOT", "dashGoShowcaseDataRoot(dash)",
+        "fontsDir: filepath.Join(data, \"fonts\")",
+    )
+    require_text(
+        stage_packager,
+        "fontsDir: filepath.Join(data, \\\"fonts\\\")",
+        "fontsDir: filepath.Join(dash, \\\"fonts\\\")",
+        "staged Showcase runtime still writes mutable data under its install root",
+        '"DASHGO_SHOWCASE_DATA_ROOT": str(work / "runtime-data")',
     )
 
     print("Studio Windows prepublication package workflow source is internally consistent.")

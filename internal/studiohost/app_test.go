@@ -27,7 +27,7 @@ func TestValidatePurgeRequestRequiresConfirmationForCustomRoot(t *testing.T) {
 
 func TestPurgeRemovesEntireStateRoot(t *testing.T) {
 	stateRoot := filepath.Join(t.TempDir(), "showcase-state")
-	for _, relative := range []string{"workspace/app/marker", "browser-profile/marker", "logs/showcase-server.log"} {
+	for _, relative := range []string{"scenario/data/marker", "browser-profile/marker", "logs/showcase-server.log"} {
 		path := filepath.Join(stateRoot, relative)
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 			t.Fatal(err)

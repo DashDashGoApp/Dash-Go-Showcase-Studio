@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/DashDashGoApp/Dash-Go-Showcase-Studio/internal/fixtures"
@@ -44,63 +43,26 @@ func (a *App) prepareScenarioForLocation(scenarioID, locationID string) error {
 		a.stopRuntime(active)
 	}
 
-	stage := filepath.Join(a.paths.stateRoot, ".workspace-stage-"+randomSuffix())
+	// Only disposable data is staged beneath the private state root. The Studio
+	// runtime itself remains installed and is never copied or executed from here.
+	stage := filepath.Join(a.paths.stateRoot, ".scenario-stage-"+randomSuffix())
 	if err := os.RemoveAll(stage); err != nil {
-		return fmt.Errorf("clear temporary Studio stage: %w", err)
+		return fmt.Errorf("clear temporary Studio scenario data: %w", err)
 	}
 	defer os.RemoveAll(stage)
-	stageApp := filepath.Join(stage, "app")
+	stageData := filepath.Join(stage, "data")
 	stageHome := filepath.Join(stage, "home")
-	if err := copyTree(a.paths.runtimeApp, stageApp); err != nil {
-		return fmt.Errorf("stage pinned Dash-Go runtime: %w", err)
-	}
 	if err := os.MkdirAll(stageHome, 0700); err != nil {
 		return fmt.Errorf("create staged Showcase home: %w", err)
 	}
-	// Studio fixtures own this disposable staging data. The pinned Dash-Go
-	// runtime's maintenance CLI is skipped on Windows because its durable
-	// parent-directory sync is denied in the GitHub-hosted staged workspace.
-	if runtime.GOOS != "windows" {
-		if err := a.runRuntimeCLI(stageApp, stageHome, "--setup-demo-mode", "--reset"); err != nil {
-			return fmt.Errorf("seed baseline Dash-Go fixture: %w", err)
-		}
-	}
-	if err := fixtures.SeedForLocation(stageApp, stageHome, scenario.ID, locationID, time.Now()); err != nil {
+	if err := fixtures.SeedForLocation(stageData, stageHome, scenario.ID, locationID, time.Now()); err != nil {
 		return fmt.Errorf("seed %s: %w", scenario.Title, err)
-	}
-	if runtime.GOOS != "windows" {
-		if err := a.runRuntimeCLI(stageApp, stageHome, "--gen-calendars"); err != nil {
-			return fmt.Errorf("generate owned household calendars: %w", err)
-		}
 	}
 	if err := fixtures.WriteRuntimeMarker(stage, scenario.ID, locationID, time.Now()); err != nil {
 		return fmt.Errorf("write Showcase marker: %w", err)
 	}
-	if err := atomicWorkspaceSwap(a.paths.workspaceRoot, stage); err != nil {
-		return fmt.Errorf("activate staged Showcase workspace: %w", err)
-	}
-	return nil
-}
-
-func (a *App) runRuntimeCLI(appRoot, home string, args ...string) error {
-	exe := filepath.Join(appRoot, "bin", filepath.Base(a.paths.runtimeServer))
-	if _, err := os.Stat(exe); err != nil {
-		return fmt.Errorf("runtime command missing: %w", err)
-	}
-	cmd := exec.Command(exe, args...)
-	prepareStudioChildCommand(cmd)
-	cmd.Dir = appRoot
-	cmd.Env = append(os.Environ(), "DASHGO_HOME="+home, "DASHGO_SHOWCASE=1")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		text := strings.TrimSpace(string(output))
-		if len(text) > 4000 {
-			text = text[len(text)-4000:]
-		}
-		if text == "" {
-			return err
-		}
-		return fmt.Errorf("%w\n%s", err, text)
+	if err := atomicScenarioSwap(a.paths.scenarioRoot, stage); err != nil {
+		return fmt.Errorf("activate staged Showcase scenario data: %w", err)
 	}
 	return nil
 }
@@ -113,14 +75,14 @@ func (a *App) startRuntime() (*runningRuntime, error) {
 		return existing, nil
 	}
 	a.mu.Unlock()
-	if _, err := os.Stat(a.paths.workspaceApp); err != nil {
-		return nil, fmt.Errorf("no prepared Showcase workspace exists; reset a scenario first")
+	if info, err := os.Stat(a.paths.scenarioData); err != nil || !info.IsDir() {
+		return nil, fmt.Errorf("no prepared Showcase scenario data exists; reset a scenario first")
 	}
 	port, err := chooseLoopbackPort()
 	if err != nil {
 		return nil, err
 	}
-	exe := filepath.Join(a.paths.workspaceApp, "bin", filepath.Base(a.paths.runtimeServer))
+	exe := a.paths.runtimeServer
 	logPath := filepath.Join(a.paths.logsRoot, "showcase-server.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
@@ -128,10 +90,11 @@ func (a *App) startRuntime() (*runningRuntime, error) {
 	}
 	cmd := exec.Command(exe)
 	prepareStudioChildCommand(cmd)
-	cmd.Dir = a.paths.workspaceApp
+	cmd.Dir = a.paths.runtimeApp
 	cmd.Env = append(os.Environ(),
-		"DASHGO_HOME="+a.paths.workspaceHome,
+		"DASHGO_HOME="+a.paths.scenarioHome,
 		"DASHGO_SHOWCASE=1",
+		"DASHGO_SHOWCASE_DATA_ROOT="+a.paths.scenarioData,
 		fmt.Sprintf("DASH_CONTROL_PORT=%d", port),
 	)
 	cmd.Stdout = logFile
@@ -240,82 +203,44 @@ func randomSuffix() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
 }
 
-func copyTree(source, destination string) error {
-	return filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(destination, rel)
-		if info.IsDir() {
-			return os.MkdirAll(target, info.Mode().Perm())
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("runtime contains unsupported non-regular file: %s", rel)
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-			return err
-		}
-		in, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer in.Close()
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode().Perm())
-		if err != nil {
-			return err
-		}
-		_, copyErr := io.Copy(out, in)
-		closeErr := out.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		return closeErr
-	})
-}
-
 const (
-	workspaceRenameAttempts     = 15
-	workspaceRenameInitialDelay = 50 * time.Millisecond
-	workspaceRenameMaximumDelay = 500 * time.Millisecond
+	scenarioRenameAttempts     = 15
+	scenarioRenameInitialDelay = 50 * time.Millisecond
+	scenarioRenameMaximumDelay = 500 * time.Millisecond
 )
 
-func atomicWorkspaceSwap(workspace, stage string) error {
-	previous := workspace + ".previous-" + randomSuffix()
-	hadWorkspace := false
-	if _, err := os.Stat(workspace); err == nil {
-		if err := renameWorkspacePath(workspace, previous); err != nil {
-			return fmt.Errorf("move prior workspace aside: %w", err)
+func atomicScenarioSwap(active, stage string) error {
+	previous := active + ".previous-" + randomSuffix()
+	hadActive := false
+	if _, err := os.Stat(active); err == nil {
+		if err := renameScenarioPath(active, previous); err != nil {
+			return fmt.Errorf("move prior scenario data aside: %w", err)
 		}
-		hadWorkspace = true
+		hadActive = true
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	if err := renameWorkspacePath(stage, workspace); err != nil {
-		if hadWorkspace {
-			_ = renameWorkspacePath(previous, workspace)
+	if err := renameScenarioPath(stage, active); err != nil {
+		if hadActive {
+			_ = renameScenarioPath(previous, active)
 		}
 		return err
 	}
-	if hadWorkspace {
+	if hadActive {
 		_ = os.RemoveAll(previous)
 	}
 	return nil
 }
 
-// renameWorkspacePath keeps the scenario reset transaction atomic. Windows can
-// briefly deny a directory rename immediately after an executable inside the
-// staged workspace exits, for example while endpoint protection or indexing has
-// an observation handle open. A bounded retry is safe because the source and
-// destination stay on the same state volume and no fallback copy is used.
-func renameWorkspacePath(source, destination string) error {
-	return retryWorkspaceRename(os.Rename, time.Sleep, runtime.GOOS == "windows", source, destination)
+// renameScenarioPath keeps the data reset transaction atomic. Windows can
+// briefly deny a directory rename after endpoint protection or indexing opens
+// an observation handle. A bounded retry is safe because both paths remain on
+// the same private state volume and no fallback copy is used.
+func renameScenarioPath(source, destination string) error {
+	return retryScenarioRename(os.Rename, time.Sleep, runtime.GOOS == "windows", source, destination)
 }
 
-func retryWorkspaceRename(
+func retryScenarioRename(
 	rename func(string, string) error,
 	sleep func(time.Duration),
 	isWindows bool,
@@ -323,16 +248,16 @@ func retryWorkspaceRename(
 ) error {
 	var last error
 	attempts := 0
-	for attempt := 0; attempt < workspaceRenameAttempts; attempt++ {
+	for attempt := 0; attempt < scenarioRenameAttempts; attempt++ {
 		attempts = attempt + 1
 		last = rename(source, destination)
 		if last == nil {
 			return nil
 		}
-		if !isTransientWindowsRenameError(last) || !isWindows || attempts == workspaceRenameAttempts {
+		if !isTransientWindowsRenameError(last) || !isWindows || attempts == scenarioRenameAttempts {
 			break
 		}
-		sleep(workspaceRenameBackoff(attempt))
+		sleep(scenarioRenameBackoff(attempt))
 	}
 	return fmt.Errorf("rename %s to %s after %d attempt(s): %w", source, destination, attempts, last)
 }
@@ -341,13 +266,13 @@ func isTransientWindowsRenameError(err error) bool {
 	return errors.Is(err, os.ErrPermission)
 }
 
-func workspaceRenameBackoff(attempt int) time.Duration {
-	delay := workspaceRenameInitialDelay
-	for step := 0; step < attempt && delay < workspaceRenameMaximumDelay; step++ {
+func scenarioRenameBackoff(attempt int) time.Duration {
+	delay := scenarioRenameInitialDelay
+	for step := 0; step < attempt && delay < scenarioRenameMaximumDelay; step++ {
 		delay *= 2
 	}
-	if delay > workspaceRenameMaximumDelay {
-		return workspaceRenameMaximumDelay
+	if delay > scenarioRenameMaximumDelay {
+		return scenarioRenameMaximumDelay
 	}
 	return delay
 }

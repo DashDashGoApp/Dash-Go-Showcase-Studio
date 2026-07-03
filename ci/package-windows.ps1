@@ -42,6 +42,75 @@ function Invoke-CheckedExternal {
     }
 }
 
+function Invoke-CheckedProcess {
+    param(
+        [Parameter(Mandatory)] [string] $FilePath,
+        [Parameter(Mandatory)] [string[]] $ArgumentList,
+        [Parameter(Mandatory)] [string] $Label,
+        [Parameter(Mandatory)] [ValidateRange(1, 3600)] [int] $TimeoutSeconds,
+        [Parameter(Mandatory)] [string] $DiagnosticsPath,
+        [string] $StandardOutputPath = '',
+        [string] $StandardErrorPath = ''
+    )
+
+    $startParameters = @{
+        FilePath = $FilePath
+        ArgumentList = $ArgumentList
+        PassThru = $true
+    }
+    if (-not [string]::IsNullOrWhiteSpace($StandardOutputPath)) {
+        $startParameters.RedirectStandardOutput = $StandardOutputPath
+    }
+    if (-not [string]::IsNullOrWhiteSpace($StandardErrorPath)) {
+        $startParameters.RedirectStandardError = $StandardErrorPath
+    }
+
+    $startedAtUtc = [DateTime]::UtcNow
+    $process = Start-Process @startParameters
+    $completed = $process.WaitForExit($TimeoutSeconds * 1000)
+    $timedOut = -not $completed
+    $terminated = $false
+
+    if ($timedOut) {
+        $taskKill = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+        if (Test-Path -LiteralPath $taskKill -PathType Leaf) {
+            & $taskKill /PID $process.Id /T /F | Out-Null
+            $terminated = $LASTEXITCODE -eq 0
+        }
+        else {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            $terminated = $true
+        }
+        $null = $process.WaitForExit(15000)
+    }
+
+    $finishedAtUtc = [DateTime]::UtcNow
+    $exitCode = $null
+    if ($process.HasExited) {
+        $exitCode = $process.ExitCode
+    }
+
+    [pscustomobject]@{
+        schema = 1
+        label = $Label
+        filePath = $FilePath
+        arguments = @($ArgumentList)
+        processID = $process.Id
+        startedAtUtc = $startedAtUtc.ToString('o')
+        finishedAtUtc = $finishedAtUtc.ToString('o')
+        timeoutSeconds = $TimeoutSeconds
+        timedOut = $timedOut
+        terminationRequested = $terminated
+        exitCode = $exitCode
+    } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $DiagnosticsPath -Encoding utf8
+
+    if ($timedOut) {
+        throw "${Label} exceeded its ${TimeoutSeconds}-second limit. The process tree was stopped; inspect $(Split-Path -Leaf $DiagnosticsPath) and its matching log."
+    }
+    if ($exitCode -ne 0) {
+        throw "${Label} failed with exit code $exitCode. Inspect $(Split-Path -Leaf $DiagnosticsPath)."
+    }
+}
 function Require-ExactlyOneFile {
     param(
         [Parameter(Mandatory)] [AllowEmptyCollection()] [System.IO.FileInfo[]] $Candidates,
@@ -137,41 +206,64 @@ Invoke-CheckedExternal -FilePath $IsccPath -ArgumentList $SmokeInstallerArgs -La
 
 $SmokeInstaller = Resolve-RequiredFile -Path (Join-Path $SmokeOutputRoot $InstallerName) -Label 'Smoke-test installer'
 
-$InstallProcess = Start-Process `
+$SmokeInstallerLog = Join-Path $DiagnosticsDir 'smoke-installer.log'
+$SmokeInstallerProcess = Join-Path $DiagnosticsDir 'smoke-installer-process.json'
+Invoke-CheckedProcess `
     -FilePath $SmokeInstaller `
-    -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-') `
-    -Wait `
-    -PassThru
-if ($InstallProcess.ExitCode -ne 0) {
-    throw "Smoke-test installer failed with exit code $($InstallProcess.ExitCode)."
-}
+    -ArgumentList @(
+        '/VERYSILENT',
+        '/SUPPRESSMSGBOXES',
+        '/NORESTART',
+        '/SP-',
+        '/NOCLOSEAPPLICATIONS',
+        '/NORESTARTAPPLICATIONS',
+        ("/LOG={0}" -f $SmokeInstallerLog)
+    ) `
+    -Label 'Smoke-test installer' `
+    -TimeoutSeconds 300 `
+    -DiagnosticsPath $SmokeInstallerProcess
 
 $InstalledExe = Resolve-RequiredFile -Path (Join-Path $SmokeInstallRoot 'dash-go-showcase-studio.exe') -Label 'installed Studio executable'
 $InstalledIcon = Resolve-RequiredFile -Path (Join-Path $SmokeInstallRoot 'assets\branding\dash-go-showcase-studio.ico') -Label 'installed Studio icon'
 
 $SelfTestLog = Join-Path $DiagnosticsDir 'installed-self-test.log'
-& $InstalledExe `
-    --action self-test `
-    --state-root $SmokeStateRoot `
-    --confirm-purge 'PURGE SHOWCASE STUDIO' `
-    --no-browser `
-    --trace *>&1 | Tee-Object -LiteralPath $SelfTestLog
-if ($LASTEXITCODE -ne 0) {
-    throw "Installed Studio self-test failed with exit code $LASTEXITCODE."
-}
+$SelfTestErrorLog = Join-Path $DiagnosticsDir 'installed-self-test.stderr.log'
+$SelfTestProcess = Join-Path $DiagnosticsDir 'installed-self-test-process.json'
+Invoke-CheckedProcess `
+    -FilePath $InstalledExe `
+    -ArgumentList @(
+        '--action',
+        'self-test',
+        '--state-root',
+        $SmokeStateRoot,
+        '--confirm-purge',
+        '"PURGE SHOWCASE STUDIO"',
+        '--no-browser',
+        '--trace'
+    ) `
+    -Label 'Installed Studio self-test' `
+    -TimeoutSeconds 300 `
+    -DiagnosticsPath $SelfTestProcess `
+    -StandardOutputPath $SelfTestLog `
+    -StandardErrorPath $SelfTestErrorLog
 
 $Uninstaller = Require-ExactlyOneFile `
     -Candidates @(Get-ChildItem -LiteralPath $SmokeInstallRoot -Filter 'unins*.exe' -File) `
     -Label 'installed Studio uninstaller'
 
-$UninstallProcess = Start-Process `
+$SmokeUninstallerLog = Join-Path $DiagnosticsDir 'smoke-uninstaller.log'
+$SmokeUninstallerProcess = Join-Path $DiagnosticsDir 'smoke-uninstaller-process.json'
+Invoke-CheckedProcess `
     -FilePath $Uninstaller.FullName `
-    -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') `
-    -Wait `
-    -PassThru
-if ($UninstallProcess.ExitCode -ne 0) {
-    throw "Smoke-test uninstaller failed with exit code $($UninstallProcess.ExitCode)."
-}
+    -ArgumentList @(
+        '/VERYSILENT',
+        '/SUPPRESSMSGBOXES',
+        '/NORESTART',
+        ("/LOG={0}" -f $SmokeUninstallerLog)
+    ) `
+    -Label 'Smoke-test uninstaller' `
+    -TimeoutSeconds 180 `
+    -DiagnosticsPath $SmokeUninstallerProcess
 
 if (Test-Path -LiteralPath $SmokeStateRoot) {
     throw "Smoke-test state root still exists after uninstall: $SmokeStateRoot"

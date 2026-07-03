@@ -156,11 +156,15 @@ def main() -> int:
         "installed curated Windows payload manifest",
         "Installed Studio payload manifest does not match the curated stage manifest.",
         "$_.relativePath -ne $script:PayloadManifestName",
-        "Studio self-test created an executable or script below its mutable state root.",
+        "$script:MutableStateExecutableExtensions",
+        "$script:MutableStateAllowedScriptPaths",
+        "scenario/data/config/config.local.js",
+        "Studio self-test created an unapproved executable or script below its mutable state root.",
         "Studio self-test modified the immutable installed payload.",
         "$PostSelfTestInstalledPayloadFileCount = Test-InstalledCuratedPayload",
         "postSelfTestInstalledPayloadFileCount = $PostSelfTestInstalledPayloadFileCount",
         "mutableStateExecutableCount = $MutableStateExecutables.Count",
+        "mutableStateAllowedScriptPaths = @($script:MutableStateAllowedScriptPaths)",
     )
     require_text(
         inno_script,
@@ -206,6 +210,13 @@ def main() -> int:
         "fontsDir: filepath.Join(dash, \\\"fonts\\\")",
         "staged Showcase runtime still writes mutable data under its install root",
         '"DASHGO_SHOWCASE_DATA_ROOT": str(work / "runtime-data")',
+        "MUTABLE_STATE_ALLOWED_SCRIPT_PATHS",
+        "assert_private_state_has_no_unapproved_executables_or_scripts",
+        'state / "scenario" / "data"',
+        'state / "scenario" / "home"',
+        'state / "scenario" / "SHOWCASE_RUNTIME.json"',
+        'state / "scenario" / "data" / "config" / "config.local.js"',
+        "recreated the retired private executable workspace",
     )
 
     print("Studio Windows prepublication package workflow source is internally consistent.")

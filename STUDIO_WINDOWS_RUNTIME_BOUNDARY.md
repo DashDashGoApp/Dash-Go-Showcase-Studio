@@ -10,7 +10,7 @@ Studio launches `runtime/app/bin/dash-go-showcase-server.exe` directly from the 
 
 ## Mutable per-user state
 
-All resettable scenario data is held below the Studio state root: scenario configuration, calendars, cache, logs, user-managed font data, browser profile, and a private simulated home directory. A scenario reset atomically replaces only this data tree. No executable, DLL, script helper, or archive may be created below the state root.
+All resettable scenario data is held below the Studio state root: scenario configuration, calendars, cache, logs, user-managed font data, browser profile, and a private simulated home directory. A scenario reset atomically replaces only this data tree. No executable, DLL, script helper, or archive may be created below the state root. `scenario/data/config/config.local.js` is the sole allowlisted generated configuration-data file with a script suffix; smoke tests reject every other script-suffixed file below the state root.
 
 ## Process and network limits
 

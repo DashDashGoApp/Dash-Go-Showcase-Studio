@@ -46,6 +46,8 @@ WINDOWS_STAGE_REQUIRED_FILES = (
 )
 WINDOWS_RUNTIME_PREFIXES = tuple(f"runtime/app/{name}/" for name in WINDOWS_RUNTIME_TREES)
 WINDOWS_DISALLOWED_SUFFIXES = frozenset({".bat", ".cmd", ".go", ".mjs", ".ps1", ".py", ".pyc", ".sh", ".test", ".zip", ".tar", ".gz"})
+MUTABLE_STATE_DISALLOWED_SUFFIXES = frozenset({".bat", ".cmd", ".cjs", ".com", ".dll", ".exe", ".js", ".jse", ".mjs", ".ps1", ".py", ".pyc", ".sh", ".vbs", ".wsf", ".wsh"})
+MUTABLE_STATE_ALLOWED_SCRIPT_PATHS = frozenset({"scenario/data/config/config.local.js"})
 WINDOWS_AS_INVOKER_MANIFEST = """<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>
 <assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">
   <trustInfo xmlns=\"urn:schemas-microsoft-com:asm.v3\">
@@ -217,6 +219,21 @@ def run(ctx: Context, phase_name: str, command: list[str], *, cwd: Path, env: di
 def need_file(path: Path, what: str, phase_name: str) -> None:
     if not path.is_file():
         raise BuildFailure(phase_name, "Missing input", f"{what} is missing: {path}")
+
+
+def assert_private_state_has_no_unapproved_executables_or_scripts(state: Path, phase_name: str) -> None:
+    disallowed = [
+        relative
+        for path in sorted(state.rglob("*"), key=lambda item: item.as_posix())
+        if path.is_file()
+        for relative in (path.relative_to(state).as_posix(),)
+        if path.suffix.lower() in MUTABLE_STATE_DISALLOWED_SUFFIXES
+        and relative not in MUTABLE_STATE_ALLOWED_SCRIPT_PATHS
+    ]
+    if disallowed:
+        shown = ", ".join(disallowed[:8])
+        suffix = "" if len(disallowed) <= 8 else ", ..."
+        raise BuildFailure(phase_name, "State safety", f"Linux package self-test created an unapproved executable or script below its private state: {shown}{suffix}")
 
 
 def prepare_work_directory(work: Path) -> None:
@@ -766,8 +783,19 @@ def linux_package_smoke(ctx: Context, deb: Path) -> None:
         need_file(wrapper, "extracted Linux full-removal wrapper", "Linux package full-removal smoke")
         state = root / "private-state"
         run(ctx, "Linux package self-test", [str(host), "--action", "self-test", "--scenario", str(ctx.manifest["defaultScenario"]), "--state-root", str(state)], cwd=host.parent, timeout=180)
-        if not (state / "logs").is_dir() or not (state / "workspace").is_dir():
-            raise BuildFailure("Linux package full-removal smoke", "State setup", "Linux package self-test did not create the required private state")
+        required_state = (
+            state / "logs",
+            state / "scenario",
+            state / "scenario" / "data",
+            state / "scenario" / "home",
+            state / "scenario" / "SHOWCASE_RUNTIME.json",
+            state / "scenario" / "data" / "config" / "config.local.js",
+        )
+        if not all(path.exists() for path in required_state):
+            raise BuildFailure("Linux package full-removal smoke", "State setup", "Linux package self-test did not create the required r2 private scenario state")
+        if (state / "workspace").exists():
+            raise BuildFailure("Linux package full-removal smoke", "State safety", "Linux package self-test recreated the retired private executable workspace")
+        assert_private_state_has_no_unapproved_executables_or_scripts(state, "Linux package full-removal smoke")
         run(ctx, "Linux package state purge", [str(host), "--action", "purge", "--state-root", str(state), "--confirm-purge", "PURGE SHOWCASE STUDIO"], cwd=host.parent, timeout=120)
         if state.exists():
             raise BuildFailure("Linux package full-removal smoke", "State cleanup", f"Linux package state purge left private state behind: {state}")

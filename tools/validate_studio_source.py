@@ -151,11 +151,18 @@ def main() -> int:
         "fontsDir: filepath.Join(dash, \\\"fonts\\\")",
         "staged Showcase runtime still writes mutable data under its install root",
         '"DASHGO_SHOWCASE_DATA_ROOT": str(work / "runtime-data")',
+        "MUTABLE_STATE_ALLOWED_SCRIPT_PATHS",
+        "assert_private_state_has_no_unapproved_executables_or_scripts",
+        'state / "scenario" / "data"',
+        'state / "scenario" / "home"',
+        'state / "scenario" / "SHOWCASE_RUNTIME.json"',
+        'state / "scenario" / "data" / "config" / "config.local.js"',
+        "recreated the retired private executable workspace",
     ):
         if token not in stage_packager:
             raise CheckError(f"Showcase engine staged data-root contract is missing: {token}")
     boundary = (root / "STUDIO_WINDOWS_RUNTIME_BOUNDARY.md").read_text(encoding="utf-8")
-    for token in ("dash-go-showcase-server.exe", "DASHGO_SHOWCASE_DATA_ROOT", "127.0.0.1", "never copies", "user-writable"):
+    for token in ("dash-go-showcase-server.exe", "DASHGO_SHOWCASE_DATA_ROOT", "127.0.0.1", "never copies", "user-writable", "scenario/data/config/config.local.js", "sole allowlisted"):
         if token not in boundary:
             raise CheckError(f"Studio Windows runtime-boundary contract is missing: {token}")
     for token in (

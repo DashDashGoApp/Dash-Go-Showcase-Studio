@@ -67,6 +67,7 @@ def main() -> int:
         ".github/workflows/studio-prepublish-candidate.yml", "PREPUBLICATION_CANDIDATE_INTAKE.md",
         "packaging/windows/DashGoShowcaseStudio.iss", "WHAT-STUDIO-DOES-LOCALLY.txt",
         "packaging/linux/dash-go-showcase-studio-uninstall", "SHOWCASE_STUDIO_2.0_CONTRACT.md", "PORTABLE_RUNTIME_OVERLAY.md",
+        "STUDIO_WINDOWS_RUNTIME_BOUNDARY.md",
     ):
         if not (root / relative).is_file():
             raise CheckError(f"missing Studio source: {relative}")
@@ -110,6 +111,7 @@ def main() -> int:
     hub_js = (root / "internal/studiohost/web/hub.js").read_text(encoding="utf-8")
     fixtures = (root / "internal/fixtures/fixtures.go").read_text(encoding="utf-8")
     patcher = (root / "tools/patch_dashgo_engine.py").read_text(encoding="utf-8")
+    stage_packager = (root / "ci/stage-package.py").read_text(encoding="utf-8")
     for token in ("case \"purge\"", "func (a *App) purge() error", "validatePurgeRequest", "requireRuntime := normalized.Action != \"clean\" && normalized.Action != \"purge\""):
         if token not in host_app:
             raise CheckError(f"Studio host is missing guarded full-state purge contract: {token}")
@@ -126,9 +128,36 @@ def main() -> int:
     for retired in ("Capture Gallery", "/api/launch", "Scenario", "id=\"reset\""):
         if retired in hub_html or retired in hub_js:
             raise CheckError(f"Studio Hub still exposes a retired scenario/reset surface: {retired}")
-    for token in ("prepareStudioChildCommand(cmd)", "func (a *App) prepareScenarioForLocation", "func (a *App) stopActiveRuntime"):
+    for token in ("prepareStudioChildCommand(cmd)", "func (a *App) prepareScenarioForLocation", "func (a *App) stopActiveRuntime", "DASHGO_SHOWCASE_DATA_ROOT", "a.paths.scenarioData", "cmd.Dir = a.paths.runtimeApp"):
         if token not in host_runtime:
             raise CheckError(f"Studio runtime isolation contract is missing: {token}")
+    for retired in ("workspaceApp", "workspaceHome", "workspaceRoot", ".workspace-stage-", "copyTree(a.paths.runtimeApp"):
+        if retired in host_runtime:
+            raise CheckError(f"Studio runtime still contains a mutable executable-workspace pattern: {retired}")
+    for token in ("scenarioRoot", "scenarioData", "scenarioHome"):
+        if token not in (root / "internal/studiohost/paths.go").read_text(encoding="utf-8"):
+            raise CheckError(f"Studio state-path contract is missing: {token}")
+    for token in (
+        "DASHGO_SHOWCASE_DATA_ROOT", "dashGoShowcaseDataRoot(dash)",
+        "configDir: filepath.Join(data, \"config\")", "fontsDir: filepath.Join(data, \"fonts\")",
+    ):
+        if token not in patcher:
+            raise CheckError(f"Showcase engine data-root overlay is missing: {token}")
+    # patch_dashgo_engine.py keeps the pre-overlay source literal as an exact
+    # replace_once anchor. The staged runtime—not the patcher text—is the
+    # authoritative place to assert that no mutable path remains under dash.
+    for token in (
+        "fontsDir: filepath.Join(data, \\\"fonts\\\")",
+        "fontsDir: filepath.Join(dash, \\\"fonts\\\")",
+        "staged Showcase runtime still writes mutable data under its install root",
+        '"DASHGO_SHOWCASE_DATA_ROOT": str(work / "runtime-data")',
+    ):
+        if token not in stage_packager:
+            raise CheckError(f"Showcase engine staged data-root contract is missing: {token}")
+    boundary = (root / "STUDIO_WINDOWS_RUNTIME_BOUNDARY.md").read_text(encoding="utf-8")
+    for token in ("dash-go-showcase-server.exe", "DASHGO_SHOWCASE_DATA_ROOT", "127.0.0.1", "never copies", "user-writable"):
+        if token not in boundary:
+            raise CheckError(f"Studio Windows runtime-boundary contract is missing: {token}")
     for token in (
         "--user-data-dir=",
         "--remote-debugging-address=127.0.0.1",

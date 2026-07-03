@@ -8,10 +8,10 @@ import (
 	"time"
 )
 
-func TestRetryWorkspaceRenameRetriesTransientWindowsAccessDenied(t *testing.T) {
+func TestRetryScenarioRenameRetriesTransientWindowsAccessDenied(t *testing.T) {
 	calls := 0
 	sleeps := 0
-	err := retryWorkspaceRename(
+	err := retryScenarioRename(
 		func(_, _ string) error {
 			calls++
 			if calls < 3 {
@@ -22,19 +22,19 @@ func TestRetryWorkspaceRenameRetriesTransientWindowsAccessDenied(t *testing.T) {
 		func(time.Duration) { sleeps++ },
 		true,
 		"stage",
-		"workspace",
+		"scenario",
 	)
 	if err != nil {
-		t.Fatalf("retryWorkspaceRename returned error: %v", err)
+		t.Fatalf("retryScenarioRename returned error: %v", err)
 	}
 	if calls != 3 || sleeps != 2 {
 		t.Fatalf("calls=%d sleeps=%d, want calls=3 sleeps=2", calls, sleeps)
 	}
 }
 
-func TestRetryWorkspaceRenameDoesNotRetryOutsideWindows(t *testing.T) {
+func TestRetryScenarioRenameDoesNotRetryOutsideWindows(t *testing.T) {
 	calls := 0
-	err := retryWorkspaceRename(
+	err := retryScenarioRename(
 		func(_, _ string) error {
 			calls++
 			return syscall.EACCES
@@ -42,7 +42,7 @@ func TestRetryWorkspaceRenameDoesNotRetryOutsideWindows(t *testing.T) {
 		func(time.Duration) { t.Fatal("sleep should not be called outside Windows") },
 		false,
 		"stage",
-		"workspace",
+		"scenario",
 	)
 	if err == nil || calls != 1 {
 		t.Fatalf("err=%v calls=%d, want one failed call", err, calls)
@@ -52,9 +52,9 @@ func TestRetryWorkspaceRenameDoesNotRetryOutsideWindows(t *testing.T) {
 	}
 }
 
-func TestRetryWorkspaceRenameDoesNotRetryNonTransientWindowsFailure(t *testing.T) {
+func TestRetryScenarioRenameDoesNotRetryNonTransientWindowsFailure(t *testing.T) {
 	calls := 0
-	err := retryWorkspaceRename(
+	err := retryScenarioRename(
 		func(_, _ string) error {
 			calls++
 			return fmt.Errorf("rename failed: %w", syscall.ENOENT)
@@ -62,7 +62,7 @@ func TestRetryWorkspaceRenameDoesNotRetryNonTransientWindowsFailure(t *testing.T
 		func(time.Duration) { t.Fatal("sleep should not be called for a non-transient error") },
 		true,
 		"stage",
-		"workspace",
+		"scenario",
 	)
 	if err == nil || calls != 1 {
 		t.Fatalf("err=%v calls=%d, want one failed call", err, calls)
@@ -72,11 +72,11 @@ func TestRetryWorkspaceRenameDoesNotRetryNonTransientWindowsFailure(t *testing.T
 	}
 }
 
-func TestWorkspaceRenameBackoffIsBounded(t *testing.T) {
-	if got := workspaceRenameBackoff(0); got != workspaceRenameInitialDelay {
-		t.Fatalf("first delay=%s, want %s", got, workspaceRenameInitialDelay)
+func TestScenarioRenameBackoffIsBounded(t *testing.T) {
+	if got := scenarioRenameBackoff(0); got != scenarioRenameInitialDelay {
+		t.Fatalf("first delay=%s, want %s", got, scenarioRenameInitialDelay)
 	}
-	if got := workspaceRenameBackoff(20); got != workspaceRenameMaximumDelay {
-		t.Fatalf("late delay=%s, want %s", got, workspaceRenameMaximumDelay)
+	if got := scenarioRenameBackoff(20); got != scenarioRenameMaximumDelay {
+		t.Fatalf("late delay=%s, want %s", got, scenarioRenameMaximumDelay)
 	}
 }

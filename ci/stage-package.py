@@ -447,6 +447,29 @@ def showcase_tour_guard_view_contract(ctx: Context, app: Path) -> None:
     for token in ("studio_location_locked", "studio_system_action_locked", "studio_file_import_locked", "studio_external_integration_locked", "studio_security_locked", "showcaseGeocode"):
         if token not in mode:
             raise BuildFailure(phase_name, "Studio guard", f"staged guard is missing {token!r}")
+    runtime_main = (app / "cmd/dashboard-control-server/main.go").read_text(encoding="utf-8")
+    for token in (
+        "data := dashGoShowcaseDataRoot(dash)",
+        "configDir: filepath.Join(data, \"config\")",
+        "calDir: filepath.Join(data, \"calendars\")",
+        "cacheDir: filepath.Join(data, \"cache\")",
+        "logDir: filepath.Join(data, \"logs\")",
+        "fontsDir: filepath.Join(data, \"fonts\")",
+    ):
+        if token not in runtime_main:
+            raise BuildFailure(phase_name, "Runtime data-root contract", f"staged Showcase runtime is missing {token!r}")
+    for retired in (
+        "configDir: filepath.Join(dash, \"config\")",
+        "calDir: filepath.Join(dash, \"calendars\")",
+        "cacheDir: filepath.Join(dash, \"cache\")",
+        "logDir: filepath.Join(dash, \"logs\")",
+        "fontsDir: filepath.Join(dash, \"fonts\")",
+    ):
+        if retired in runtime_main:
+            raise BuildFailure(phase_name, "Runtime data-root contract", f"staged Showcase runtime still writes mutable data under its install root: {retired}")
+    for token in ("DASHGO_SHOWCASE_DATA_ROOT", "dashGoShowcaseDataRoot"):
+        if token not in mode:
+            raise BuildFailure(phase_name, "Runtime data-root contract", f"staged Showcase mode overlay is missing {token!r}")
     if "showcaseStudioLocationLocked" not in location:
         raise BuildFailure(phase_name, "Location lock", "staged location editor does not map Studio lock response to its modal")
     summary_start = navigation.find("function bindCtrlSummaryTaps()")
@@ -865,7 +888,19 @@ def main() -> int:
             linux_engine = linux_entry["engine"] if linux_entry else None
             linux_host = linux_entry["host"] if linux_entry else None
             if linux_engine:
-                run(ctx, "Verify generated assets with Linux runtime", [str(linux_engine), "--verify-generated-assets"], cwd=app, env={**planned_env(ctx), "DASHGO_SHOWCASE": "1", "DASHGO_HOME": str(work / "runtime-home")}, timeout=600)
+                run(
+                    ctx,
+                    "Verify generated assets with Linux runtime",
+                    [str(linux_engine), "--verify-generated-assets"],
+                    cwd=app,
+                    env={
+                        **planned_env(ctx),
+                        "DASHGO_SHOWCASE": "1",
+                        "DASHGO_HOME": str(work / "runtime-home"),
+                        "DASHGO_SHOWCASE_DATA_ROOT": str(work / "runtime-data"),
+                    },
+                    timeout=600,
+                )
         with phase(ctx, 8, "Assemble target packages"):
             futures: dict[str, concurrent.futures.Future[Path]] = {}
             with concurrent.futures.ThreadPoolExecutor(max_workers=min(2, ctx.plan.cross_workers)) as pool:

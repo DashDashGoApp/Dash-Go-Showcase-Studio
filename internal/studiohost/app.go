@@ -117,13 +117,13 @@ func (a *App) clean() error {
 		return fmt.Errorf("cannot clean while this Studio session has a running runtime")
 	}
 	a.mu.Unlock()
-	if err := os.RemoveAll(a.paths.workspaceRoot); err != nil {
-		return fmt.Errorf("remove private workspace: %w", err)
+	if err := os.RemoveAll(a.paths.scenarioRoot); err != nil {
+		return fmt.Errorf("remove private scenario data: %w", err)
 	}
 	if err := os.RemoveAll(a.paths.browserRoot); err != nil {
 		return fmt.Errorf("remove private browser profile: %w", err)
 	}
-	fmt.Println("CLEANED private Showcase workspace")
+	fmt.Println("CLEANED private Showcase scenario data")
 	return nil
 }
 

@@ -13,9 +13,9 @@ type paths struct {
 	runtimeApp    string
 	runtimeServer string
 	stateRoot     string
-	workspaceRoot string
-	workspaceApp  string
-	workspaceHome string
+	scenarioRoot  string
+	scenarioData  string
+	scenarioHome  string
 	logsRoot      string
 	browserRoot   string
 }
@@ -25,7 +25,11 @@ func resolvePaths(stateOverride string, requireRuntime bool) (paths, error) {
 	if err != nil {
 		return paths{}, fmt.Errorf("locate Studio executable: %w", err)
 	}
-	installRoot := filepath.Dir(exe)
+	return resolvePathsFromInstallRoot(filepath.Dir(exe), stateOverride, requireRuntime)
+}
+
+func resolvePathsFromInstallRoot(installRoot, stateOverride string, requireRuntime bool) (paths, error) {
+	installRoot = filepath.Clean(installRoot)
 	runtimeApp := filepath.Join(installRoot, "runtime", "app")
 	serverName := "dash-go-showcase-server"
 	if runtime.GOOS == "windows" {
@@ -51,9 +55,9 @@ func resolvePaths(stateOverride string, requireRuntime bool) (paths, error) {
 		runtimeApp:    runtimeApp,
 		runtimeServer: runtimeServer,
 		stateRoot:     stateRoot,
-		workspaceRoot: filepath.Join(stateRoot, "workspace"),
-		workspaceApp:  filepath.Join(stateRoot, "workspace", "app"),
-		workspaceHome: filepath.Join(stateRoot, "workspace", "home"),
+		scenarioRoot:  filepath.Join(stateRoot, "scenario"),
+		scenarioData:  filepath.Join(stateRoot, "scenario", "data"),
+		scenarioHome:  filepath.Join(stateRoot, "scenario", "home"),
 		logsRoot:      filepath.Join(stateRoot, "logs"),
 		browserRoot:   filepath.Join(stateRoot, "browser-profile"),
 	}, nil

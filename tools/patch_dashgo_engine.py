@@ -166,7 +166,38 @@ def apply(app: Path) -> None:
     )
 
     main = cmd / "main.go"
-    replace_once(main, 'home, _ := os.UserHomeDir()', 'home := dashGoRuntimeHome()')
+    replace_once(
+        main,
+        '''func newAppFromRuntime() *app {
+\texe, _ := os.Executable()
+\tdash := filepath.Dir(filepath.Dir(exe))
+\tif _, err := os.Stat(filepath.Join(dash, "index.html")); err != nil {
+\t\tif wd, err := os.Getwd(); err == nil {
+\t\t\tdash = wd
+\t\t}
+\t}
+\thome, _ := os.UserHomeDir()
+\ta := &app{dash: dash, home: home, configDir: filepath.Join(dash, "config"), calDir: filepath.Join(dash, "calendars"), cacheDir: filepath.Join(dash, "cache"), logDir: filepath.Join(dash, "logs"), binDir: filepath.Join(dash, "bin"), settingsFile: filepath.Join(dash, "config", "settings.json"), configLocal: filepath.Join(dash, "config", "config.local.js"), celebrationsFile: filepath.Join(home, ".dashboard-celebrations"), todoDir: filepath.Join(dash, "config", "todo"), todoTokenFile: filepath.Join(home, ".dashboard-todo.json"), fontsDir: filepath.Join(dash, "fonts"), todoStreams: map[chan []byte]bool{}, releaseVersion: fileio.ReadString(filepath.Join(dash, "VERSION"), "")}
+\ta.settings = settingspkg.New(a.settingsConfig())
+\treturn a
+}
+''',
+        '''func newAppFromRuntime() *app {
+\texe, _ := os.Executable()
+\tdash := filepath.Dir(filepath.Dir(exe))
+\tif _, err := os.Stat(filepath.Join(dash, "index.html")); err != nil {
+\t\tif wd, err := os.Getwd(); err == nil {
+\t\t\tdash = wd
+\t\t}
+\t}
+\thome := dashGoRuntimeHome()
+\tdata := dashGoShowcaseDataRoot(dash)
+\ta := &app{dash: dash, home: home, configDir: filepath.Join(data, "config"), calDir: filepath.Join(data, "calendars"), cacheDir: filepath.Join(data, "cache"), logDir: filepath.Join(data, "logs"), binDir: filepath.Join(dash, "bin"), settingsFile: filepath.Join(data, "config", "settings.json"), configLocal: filepath.Join(data, "config", "config.local.js"), celebrationsFile: filepath.Join(home, ".dashboard-celebrations"), todoDir: filepath.Join(data, "config", "todo"), todoTokenFile: filepath.Join(home, ".dashboard-todo.json"), fontsDir: filepath.Join(data, "fonts"), todoStreams: map[chan []byte]bool{}, releaseVersion: fileio.ReadString(filepath.Join(dash, "VERSION"), "")}
+\ta.settings = settingspkg.New(a.settingsConfig())
+\treturn a
+}
+''',
+    )
     replace_once(
         main,
         '''\t// A server restart during an update can happen between writing the terminal
@@ -290,6 +321,7 @@ package main
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -299,6 +331,16 @@ func dashGoRuntimeHome() string {
 	}
 	home, _ := os.UserHomeDir()
 	return home
+}
+
+func dashGoShowcaseDataRoot(assetRoot string) string {
+	if strings.TrimSpace(os.Getenv("DASHGO_SHOWCASE")) != "1" {
+		return assetRoot
+	}
+	if root := strings.TrimSpace(os.Getenv("DASHGO_SHOWCASE_DATA_ROOT")); root != "" {
+		return filepath.Clean(root)
+	}
+	return assetRoot
 }
 
 func (a *app) showcaseMode() bool {

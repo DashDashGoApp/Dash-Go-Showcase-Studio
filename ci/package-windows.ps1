@@ -32,6 +32,12 @@ $script:CuratedTreePrefixes = @(
     'runtime/app/release/',
     'runtime/app/ui/'
 )
+$script:MutableStateExecutableExtensions = @(
+    '.exe', '.dll', '.com', '.bat', '.cmd', '.ps1', '.vbs', '.js', '.jse', '.mjs', '.cjs', '.wsf', '.wsh'
+)
+$script:MutableStateAllowedScriptPaths = @(
+    'scenario/data/config/config.local.js'
+)
 
 function Resolve-RequiredDirectory {
     param([Parameter(Mandatory)] [string] $Path, [Parameter(Mandatory)] [string] $Label)
@@ -492,13 +498,22 @@ if ($PostSelfTestInstalledPayloadFileCount -ne $InstalledPayloadFileCount) {
     throw 'Studio self-test modified the immutable installed payload.'
 }
 
+$ExpectedMutableConfiguration = Resolve-RequiredFile `
+    -Path (Join-Path $SmokeStateRoot 'scenario\data\config\config.local.js') `
+    -Label 'generated Studio configuration data'
+
 $MutableStateExecutables = @(
     Get-ChildItem -LiteralPath $SmokeStateRoot -Recurse -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Extension.ToLowerInvariant() -in @('.exe', '.dll', '.com', '.bat', '.cmd', '.ps1', '.vbs', '.js', '.jse', '.wsf', '.wsh') }
+        Where-Object {
+            $extension = $_.Extension.ToLowerInvariant()
+            $relative = ConvertTo-NormalizedRelativePath -Root $SmokeStateRoot -FullName $_.FullName
+            ($script:MutableStateExecutableExtensions -contains $extension) -and
+            ($script:MutableStateAllowedScriptPaths -notcontains $relative)
+        }
 )
 if ($MutableStateExecutables.Count -ne 0) {
     $MutableStateExecutables.FullName
-    throw 'Studio self-test created an executable or script below its mutable state root.'
+    throw 'Studio self-test created an unapproved executable or script below its mutable state root.'
 }
 
 $Uninstaller = Require-ExactlyOneFile `
@@ -540,6 +555,8 @@ if (Test-Path -LiteralPath (Join-Path $SmokeInstallRoot 'dash-go-showcase-studio
     installedPayloadFileCount = $InstalledPayloadFileCount
     postSelfTestInstalledPayloadFileCount = $PostSelfTestInstalledPayloadFileCount
     mutableStateExecutableCount = $MutableStateExecutables.Count
+    mutableStateAllowedScriptPaths = @($script:MutableStateAllowedScriptPaths)
+    expectedMutableConfiguration = (ConvertTo-NormalizedRelativePath -Root $SmokeStateRoot -FullName $ExpectedMutableConfiguration)
     stageExecutable = $StudioExe.FullName
     installer = [System.IO.Path]::GetFileName($InstallerPath)
     installerSha256 = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -551,5 +568,5 @@ if (Test-Path -LiteralPath (Join-Path $SmokeInstallRoot 'dash-go-showcase-studio
 Write-Host "PASS: Windows installer candidate: $InstallerPath"
 Write-Host "PASS: curated Windows payload manifest contains $($Payload.fileCount) files and matches the installed package."
 Write-Host 'PASS: Studio self-test left the immutable installed payload unchanged.'
-Write-Host 'PASS: Studio mutable state contains no executable or script files.'
+Write-Host 'PASS: Studio mutable state contains no unapproved executable or script files.'
 Write-Host 'PASS: isolated install, self-test, and uninstall smoke completed.'

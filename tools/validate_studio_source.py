@@ -65,7 +65,7 @@ def main() -> int:
         "tools/refresh_dashgo_baseline.py", "tools/prepare_dashgo_release.py",
         "tools/validate_studio_prepublication_bridge.py", "tools/test_prepare_dashgo_release_prepublication.py",
         ".github/workflows/studio-prepublish-candidate.yml", "PREPUBLICATION_CANDIDATE_INTAKE.md",
-        "packaging/windows/DashGoShowcaseStudio.iss",
+        "packaging/windows/DashGoShowcaseStudio.iss", "WHAT-STUDIO-DOES-LOCALLY.txt",
         "packaging/linux/dash-go-showcase-studio-uninstall", "SHOWCASE_STUDIO_2.0_CONTRACT.md", "PORTABLE_RUNTIME_OVERLAY.md",
     ):
         if not (root / relative).is_file():
@@ -78,11 +78,28 @@ def main() -> int:
         'GetEnv("DASHGO_STUDIO_SMOKE_DEFAULT_DIR")', 'GetEnv("DASHGO_STUDIO_SMOKE_STATE_ROOT")',
         "DASHGO_STUDIO_SMOKE_DEFAULT_DIR must be supplied for a SmokeTest build.",
         "DASHGO_STUDIO_SMOKE_STATE_ROOT must be supplied for a SmokeTest build.",
-        "UsePreviousAppDir=no", "SmokeAppId", "ReleasePackageVersion", "AppVerName", "[UninstallRun]", "--action purge", "[UninstallDelete]",
+        "UsePreviousAppDir=no", "SmokeAppId", "ReleasePackageVersion", "VersionInfoVersion", "AppVerName", "[UninstallRun]", "--action purge", "RunOnceId", "[UninstallDelete]",
         'Type: filesandordirs; Name: "{localappdata}\\Dash-Go Showcase Studio"',
+        "Compression=lzma2/max", "SolidCompression=no", "AppSupportURL=", "AppUpdatesURL=",
+        "VersionInfoCompany=DashDashGoApp", "VersionInfoDescription=Dash-Go Showcase Studio Installer",
+        "VersionInfoProductName={#StudioName}", "VersionInfoOriginalFileName=",
+        "INSTALLER_CONTENTS.json", "WHAT-STUDIO-DOES-LOCALLY.txt",
     ):
         if token not in installer:
             raise CheckError(f"Windows installer is missing full-removal contract token: {token}")
+    for retired in (
+        'Source: "{#StageDir}\\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs',
+        "Compression=lzma2/ultra64", "SolidCompression=yes", "PrivilegesRequiredOverridesAllowed=dialog",
+    ):
+        if retired in installer:
+            raise CheckError(f"Windows installer still contains retired broad or high-risk packaging setting: {retired}")
+    local_behavior = (root / "WHAT-STUDIO-DOES-LOCALLY.txt").read_text(encoding="utf-8")
+    for token in (
+        "127.0.0.1", "per-user", "Windows service", "scheduled task", "startup entry", "firewall",
+        "download and run", "source files", "test suites", "script helpers", "CLI companion",
+    ):
+        if token not in local_behavior:
+            raise CheckError(f"Studio local-behavior document is missing transparency token: {token}")
     host_app = (root / "internal/studiohost/app.go").read_text(encoding="utf-8")
     host_options = (root / "internal/studiohost/options.go").read_text(encoding="utf-8")
     host_runtime = (root / "internal/studiohost/runtime.go").read_text(encoding="utf-8")

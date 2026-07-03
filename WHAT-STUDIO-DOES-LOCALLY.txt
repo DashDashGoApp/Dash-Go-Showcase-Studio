@@ -1,0 +1,11 @@
+Dash-Go Showcase Studio: What it does locally
+
+Dash-Go Showcase Studio is a local, disposable demonstration of Dash-Go. It installs per-user under your local application data folder and keeps its private Studio state there.
+
+When a tour starts, Studio creates demo-only calendar, household, and display data in that private state. The bundled Dashboard runtime listens only on 127.0.0.1 so the Studio window can display the local demo. Studio cleans its demo state when a tour ends or when the application is purged.
+
+This installer does not install a Windows service, driver, scheduled task, startup entry, firewall rule, system policy, or machine-wide Dashboard service. It does not silently download and run additional software.
+
+The public Windows package intentionally excludes Dash-Go source files, test suites, build utilities, script helpers, and the Studio CLI companion. It includes only the Studio GUI, the local Windows runtime server, required UI, configuration, and release assets, branding, licenses, and this package inventory.
+
+The Inno Setup uninstaller registers normal per-user uninstall information and removes the Studio installation. Its cleanup action removes only the exact private Studio state root.

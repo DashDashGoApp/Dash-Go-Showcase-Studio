@@ -9,6 +9,30 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+$script:PayloadLayout = 'windows-curated-v1'
+$script:PayloadManifestName = 'INSTALLER_CONTENTS.json'
+$script:CuratedExactFiles = @(
+    'dash-go-showcase-studio.exe',
+    'dash-go-showcase-studio.exe.manifest',
+    'STUDIO_RUNTIME.json',
+    'INSTALLER_CONTENTS.json',
+    'NOTICE.md',
+    'LICENSE',
+    'DASH-GO-THIRD-PARTY-NOTICES.md',
+    'WHAT-STUDIO-DOES-LOCALLY.txt',
+    'assets/branding/dash-go-showcase-studio.ico',
+    'runtime/app/VERSION',
+    'runtime/app/index.html',
+    'runtime/app/themes.list',
+    'runtime/app/bin/dash-go-showcase-server.exe',
+    'runtime/app/bin/dash-go-showcase-server.exe.manifest'
+)
+$script:CuratedTreePrefixes = @(
+    'runtime/app/base/',
+    'runtime/app/release/',
+    'runtime/app/ui/'
+)
+
 function Resolve-RequiredDirectory {
     param([Parameter(Mandatory)] [string] $Path, [Parameter(Mandatory)] [string] $Label)
 
@@ -111,6 +135,7 @@ function Invoke-CheckedProcess {
         throw "${Label} failed with exit code $exitCode. Inspect $(Split-Path -Leaf $DiagnosticsPath)."
     }
 }
+
 function Require-ExactlyOneFile {
     param(
         [Parameter(Mandatory)] [AllowEmptyCollection()] [System.IO.FileInfo[]] $Candidates,
@@ -122,6 +147,222 @@ function Require-ExactlyOneFile {
     }
 
     return $Candidates[0]
+}
+
+function ConvertTo-NormalizedRelativePath {
+    param(
+        [Parameter(Mandatory)] [string] $Root,
+        [Parameter(Mandatory)] [string] $FullName
+    )
+
+    $relative = [System.IO.Path]::GetRelativePath($Root, $FullName).Replace('\', '/')
+    if ([string]::IsNullOrWhiteSpace($relative) -or $relative -eq '.' -or
+        $relative.StartsWith('../', [StringComparison]::Ordinal) -or
+        $relative.Contains('/../', [StringComparison]::Ordinal) -or
+        [System.IO.Path]::IsPathRooted($relative)) {
+        throw "Payload file resolves outside its expected root: $FullName"
+    }
+
+    return $relative
+}
+
+function Get-FileInventory {
+    param(
+        [Parameter(Mandatory)] [string] $Root,
+        [string[]] $ExcludeRelativePaths = @()
+    )
+
+    $excluded = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($relative in $ExcludeRelativePaths) {
+        $null = $excluded.Add($relative.Replace('\', '/'))
+    }
+
+    return @(
+        Get-ChildItem -LiteralPath $Root -Recurse -File |
+            ForEach-Object {
+                $relative = ConvertTo-NormalizedRelativePath -Root $Root -FullName $_.FullName
+                if (-not $excluded.Contains($relative)) {
+                    [pscustomobject]@{
+                        relativePath = $relative
+                        sizeBytes = $_.Length
+                        sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+                    }
+                }
+            } |
+            Sort-Object -Property relativePath
+    )
+}
+
+function Test-IsCuratedPayloadPath {
+    param([Parameter(Mandatory)] [string] $RelativePath)
+
+    if ($script:CuratedExactFiles -contains $RelativePath) {
+        return $true
+    }
+
+    foreach ($prefix in $script:CuratedTreePrefixes) {
+        if ($RelativePath.StartsWith($prefix, [StringComparison]::Ordinal)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Get-WindowsCuratedPayload {
+    param([Parameter(Mandatory)] [string] $Root)
+
+    $manifestPath = Resolve-RequiredFile -Path (Join-Path $Root $script:PayloadManifestName) -Label 'curated Windows payload manifest'
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+
+    if ([int]$manifest.schema -ne 1 -or
+        [string]$manifest.payloadLayout -ne $script:PayloadLayout -or
+        [string]$manifest.platform -ne 'windows-amd64' -or
+        [bool]$manifest.selfExcluded -ne $true) {
+        throw 'Curated Windows payload manifest header is invalid.'
+    }
+
+    $manifestFiles = @($manifest.files)
+    if ($manifestFiles.Count -eq 0) {
+        throw 'Curated Windows payload manifest contains no files.'
+    }
+
+    $actual = @(Get-FileInventory -Root $Root -ExcludeRelativePaths @($script:PayloadManifestName))
+    $actualByPath = @{}
+    foreach ($item in $actual) {
+        if (-not (Test-IsCuratedPayloadPath -RelativePath $item.relativePath)) {
+            throw "Windows staging payload contains an unapproved file: $($item.relativePath)"
+        }
+        $actualByPath[$item.relativePath] = $item
+    }
+
+    foreach ($required in $script:CuratedExactFiles) {
+        if ($required -eq $script:PayloadManifestName) {
+            continue
+        }
+        if (-not $actualByPath.ContainsKey($required)) {
+            throw "Windows staging payload is missing required file: $required"
+        }
+    }
+
+    foreach ($prefix in $script:CuratedTreePrefixes) {
+        if (-not ($actual | Where-Object { $_.relativePath.StartsWith($prefix, [StringComparison]::Ordinal) })) {
+            throw "Windows staging payload has an empty required tree: $prefix"
+        }
+    }
+
+    $expectedExecutables = @(
+        'dash-go-showcase-studio.exe',
+        'runtime/app/bin/dash-go-showcase-server.exe'
+    )
+    $actualExecutables = @($actual | Where-Object { $_.relativePath.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { $_.relativePath })
+    if (($actualExecutables -join "`n") -ne ($expectedExecutables -join "`n")) {
+        throw "Windows staging payload must contain exactly the approved executables. Found: $($actualExecutables -join ', ')"
+    }
+
+    foreach ($manifestName in @('dash-go-showcase-studio.exe.manifest', 'runtime/app/bin/dash-go-showcase-server.exe.manifest')) {
+        $text = Get-Content -LiteralPath (Join-Path $Root $manifestName) -Raw
+        if ($text -notmatch 'requestedExecutionLevel level="asInvoker" uiAccess="false"') {
+            throw "Windows executable manifest is not explicit asInvoker/uiAccess=false: $manifestName"
+        }
+    }
+
+    $seen = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($item in $manifestFiles) {
+        $relative = [string]$item.path
+        if ([string]::IsNullOrWhiteSpace($relative) -or $relative.Contains('\') -or
+            $relative.StartsWith('/', [StringComparison]::Ordinal) -or
+            $relative.StartsWith('../', [StringComparison]::Ordinal) -or
+            $relative.Contains('/../', [StringComparison]::Ordinal) -or
+            -not $seen.Add($relative)) {
+            throw "Curated Windows payload manifest has an unsafe or duplicate path: $relative"
+        }
+        if (-not $actualByPath.ContainsKey($relative)) {
+            throw "Curated Windows payload manifest names a missing stage file: $relative"
+        }
+        $actualItem = $actualByPath[$relative]
+        if ([Int64]$item.sizeBytes -ne [Int64]$actualItem.sizeBytes -or
+            [string]$item.sha256 -ne [string]$actualItem.sha256) {
+            throw "Curated Windows payload manifest hash or size mismatch: $relative"
+        }
+    }
+
+    if ($seen.Count -ne $actualByPath.Count) {
+        throw 'Curated Windows payload manifest does not exactly describe the stage files.'
+    }
+
+    [pscustomobject]@{
+        manifestPath = $manifestPath
+        manifestSha256 = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        manifest = $manifest
+        fileCount = $actual.Count
+        files = $actual
+    }
+}
+
+function Get-InnoVersionInfoVersion {
+    param([Parameter(Mandatory)] [string] $ReleasePackageVersion)
+
+    $match = [regex]::Match($ReleasePackageVersion, '^(?<major>[0-9]+)\.(?<minor>[0-9]+)\.(?<patch>[0-9]+)(?:-(?:test\.|r)(?<revision>[0-9]+))?$')
+    if (-not $match.Success) {
+        throw "Could not derive a numeric Inno version from release package version '$ReleasePackageVersion'."
+    }
+
+    $revision = if ($match.Groups['revision'].Success) { $match.Groups['revision'].Value } else { '0' }
+    return "$($match.Groups['major'].Value).$($match.Groups['minor'].Value).$($match.Groups['patch'].Value).$revision"
+}
+
+function Test-InstalledCuratedPayload {
+    param(
+        [Parameter(Mandatory)] [string] $InstallRoot,
+        [Parameter(Mandatory)] $Payload
+    )
+
+    $installedManifestPath = Resolve-RequiredFile `
+        -Path (Join-Path $InstallRoot $script:PayloadManifestName) `
+        -Label 'installed curated Windows payload manifest'
+    $installedManifestSha256 = (Get-FileHash -LiteralPath $installedManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($installedManifestSha256 -ne [string]$Payload.manifestSha256) {
+        throw 'Installed Studio payload manifest does not match the curated stage manifest.'
+    }
+
+    $allInstalled = @(Get-FileInventory -Root $InstallRoot)
+    $installed = @(
+        $allInstalled |
+            Where-Object {
+                $_.relativePath -notlike 'unins*.exe' -and
+                $_.relativePath -notlike 'unins*.dat' -and
+                $_.relativePath -notlike 'unins*.msg' -and
+                $_.relativePath -ne $script:PayloadManifestName
+            }
+    )
+
+    $expectedByPath = @{}
+    foreach ($item in @($Payload.manifest.files)) {
+        $expectedByPath[[string]$item.path] = $item
+    }
+    $installedByPath = @{}
+    foreach ($item in $installed) {
+        $installedByPath[$item.relativePath] = $item
+    }
+
+    if ($expectedByPath.Count -ne $installedByPath.Count) {
+        throw "Installed Studio payload file count does not match the curated stage manifest. Expected $($expectedByPath.Count); found $($installedByPath.Count)."
+    }
+
+    foreach ($relative in $expectedByPath.Keys) {
+        if (-not $installedByPath.ContainsKey($relative)) {
+            throw "Installed Studio payload is missing manifest file: $relative"
+        }
+        $expected = $expectedByPath[$relative]
+        $actual = $installedByPath[$relative]
+        if ([Int64]$expected.sizeBytes -ne [Int64]$actual.sizeBytes -or
+            [string]$expected.sha256 -ne [string]$actual.sha256) {
+            throw "Installed Studio payload hash or size mismatch: $relative"
+        }
+    }
+
+    return $installed.Count
 }
 
 $StageDir = Resolve-RequiredDirectory -Path $StageDir -Label 'Windows staging payload'
@@ -156,26 +397,23 @@ $RuntimePlatform = [string]$RuntimeObject.platform
 if ($RuntimePlatform -ne 'windows-amd64') {
     throw "Staged Studio runtime platform is invalid: '$RuntimePlatform'."
 }
+if ([string]$RuntimeObject.payloadLayout -ne $script:PayloadLayout -or
+    [string]$RuntimeObject.payloadManifest -ne $script:PayloadManifestName) {
+    throw 'Staged Studio runtime metadata does not identify the curated Windows payload.'
+}
 
+$Payload = Get-WindowsCuratedPayload -Root $StageDir
 $StudioExe = Require-ExactlyOneFile `
     -Candidates @(Get-ChildItem -LiteralPath $StageDir -Filter 'dash-go-showcase-studio.exe' -File -Recurse) `
     -Label 'staged Windows Studio executable'
-
-$RequiredStageFiles = @(
-    'assets\branding\dash-go-showcase-studio.ico'
-)
-
-foreach ($RelativePath in $RequiredStageFiles) {
-    $Candidate = Join-Path $StageDir $RelativePath
-    if (-not (Test-Path -LiteralPath $Candidate -PathType Leaf)) {
-        throw "Windows staging payload lacks required branding asset: $RelativePath"
-    }
-}
+$InstalledIcon = Resolve-RequiredFile -Path (Join-Path $StageDir 'assets\branding\dash-go-showcase-studio.ico') -Label 'staged Studio icon'
+$VersionInfoVersion = Get-InnoVersionInfoVersion -ReleasePackageVersion $ReleasePackageVersion
 
 $NormalInstallerArgs = @(
     "/DStageDir=$StageDir",
     "/DStudioVersion=$StudioVersion",
     "/DReleasePackageVersion=$ReleasePackageVersion",
+    "/DVersionInfoVersion=$VersionInfoVersion",
     "/DOutputDir=$OutputDir",
     $InstallerScript
 )
@@ -184,6 +422,7 @@ Invoke-CheckedExternal -FilePath $IsccPath -ArgumentList $NormalInstallerArgs -L
 $InstallerName = "Dash-Go_Showcase_Studio_${ReleasePackageVersion}_Windows_Setup.exe"
 $InstallerPath = Join-Path $OutputDir $InstallerName
 $InstallerPath = Resolve-RequiredFile -Path $InstallerPath -Label 'Windows installer candidate'
+Copy-Item -LiteralPath $Payload.manifestPath -Destination (Join-Path $OutputDir $script:PayloadManifestName) -Force
 
 $SmokeRoot = Join-Path $DiagnosticsDir 'isolated-smoke'
 $SmokeInstallRoot = Join-Path $SmokeRoot 'install'
@@ -198,6 +437,7 @@ $SmokeInstallerArgs = @(
     "/DStageDir=$StageDir",
     "/DStudioVersion=$StudioVersion",
     "/DReleasePackageVersion=$ReleasePackageVersion",
+    "/DVersionInfoVersion=$VersionInfoVersion",
     "/DOutputDir=$SmokeOutputRoot",
     '/DSmokeTest=1',
     $InstallerScript
@@ -225,6 +465,7 @@ Invoke-CheckedProcess `
 
 $InstalledExe = Resolve-RequiredFile -Path (Join-Path $SmokeInstallRoot 'dash-go-showcase-studio.exe') -Label 'installed Studio executable'
 $InstalledIcon = Resolve-RequiredFile -Path (Join-Path $SmokeInstallRoot 'assets\branding\dash-go-showcase-studio.ico') -Label 'installed Studio icon'
+$InstalledPayloadFileCount = Test-InstalledCuratedPayload -InstallRoot $SmokeInstallRoot -Payload $Payload
 
 $SelfTestLog = Join-Path $DiagnosticsDir 'installed-self-test.log'
 $SelfTestErrorLog = Join-Path $DiagnosticsDir 'installed-self-test.stderr.log'
@@ -274,10 +515,16 @@ if (Test-Path -LiteralPath (Join-Path $SmokeInstallRoot 'dash-go-showcase-studio
 }
 
 [pscustomobject]@{
-    schema = 1
+    schema = 2
     result = 'PASS'
     studioVersion = $StudioVersion
     releasePackageVersion = $ReleasePackageVersion
+    versionInfoVersion = $VersionInfoVersion
+    payloadLayout = $script:PayloadLayout
+    payloadManifest = $script:PayloadManifestName
+    payloadManifestSha256 = $Payload.manifestSha256
+    payloadFileCount = $Payload.fileCount
+    installedPayloadFileCount = $InstalledPayloadFileCount
     stageExecutable = $StudioExe.FullName
     installer = [System.IO.Path]::GetFileName($InstallerPath)
     installerSha256 = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -287,4 +534,5 @@ if (Test-Path -LiteralPath (Join-Path $SmokeInstallRoot 'dash-go-showcase-studio
 } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $DiagnosticsDir 'windows-package-summary.json') -Encoding utf8
 
 Write-Host "PASS: Windows installer candidate: $InstallerPath"
+Write-Host "PASS: curated Windows payload manifest contains $($Payload.fileCount) files and matches the installed package."
 Write-Host 'PASS: isolated install, self-test, and uninstall smoke completed.'

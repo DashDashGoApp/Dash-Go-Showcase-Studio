@@ -36,6 +36,7 @@ def main() -> int:
     legacy_workflow = root / ".github" / "workflows" / "studio-windows-package-candidate.yml"
     stage_workflow = root / ".github" / "workflows" / "studio-prepublish-candidate.yml"
     package_script = root / "ci" / "package-windows.ps1"
+    stage_packager = root / "ci" / "stage-package.py"
     inno_script = root / "packaging" / "windows" / "DashGoShowcaseStudio.iss"
 
     require_text(
@@ -127,6 +128,55 @@ def main() -> int:
         inno_script,
         "#ifdef SmokeTest",
         "--action purge",
+    )
+
+    require_text(
+        stage_packager,
+        'WINDOWS_PAYLOAD_LAYOUT = "windows-curated-v1"',
+        "copy_windows_runtime_payload",
+        "write_windows_as_invoker_manifest",
+        "write_windows_payload_manifest",
+        "validate_windows_stage_payload",
+        "INSTALLER_CONTENTS.json",
+        "WHAT-STUDIO-DOES-LOCALLY.txt",
+        "payloadLayout",
+        "payloadManifest",
+    )
+    forbid_text(stage_packager, "cli_host")
+    forbid_text(stage_packager, "dash-go-showcase-studio-cli.exe")
+    require_text(
+        package_script,
+        "Get-WindowsCuratedPayload",
+        "Test-InstalledCuratedPayload",
+        "payloadLayout = $script:PayloadLayout",
+        "payloadManifestSha256",
+        "curated Windows payload manifest",
+        "installed curated Windows payload manifest",
+        "Installed Studio payload manifest does not match the curated stage manifest.",
+        "$_.relativePath -ne $script:PayloadManifestName",
+    )
+    require_text(
+        inno_script,
+        "Compression=lzma2/max",
+        "SolidCompression=no",
+        "VersionInfoCompany=DashDashGoApp",
+        "VersionInfoProductName={#StudioName}",
+        "VersionInfoOriginalFileName=",
+        "RunOnceId",
+        "INSTALLER_CONTENTS.json",
+        "WHAT-STUDIO-DOES-LOCALLY.txt",
+    )
+    forbid_text(inno_script, r'Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs')
+    forbid_text(inno_script, "Compression=lzma2/ultra64")
+    forbid_text(inno_script, "SolidCompression=yes")
+    forbid_text(inno_script, "PrivilegesRequiredOverridesAllowed=dialog")
+    require_text(
+        workflow,
+        "payloadLayout",
+        "payloadManifest",
+        "payloadManifestSha256",
+        "payloadFileCount",
+        "curated Windows payload contract",
     )
 
     print("Studio Windows prepublication package workflow source is internally consistent.")

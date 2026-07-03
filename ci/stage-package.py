@@ -24,6 +24,40 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 
+WINDOWS_PAYLOAD_LAYOUT = "windows-curated-v1"
+WINDOWS_PAYLOAD_MANIFEST = "INSTALLER_CONTENTS.json"
+WINDOWS_RUNTIME_ROOT_FILES = ("VERSION", "index.html", "themes.list")
+WINDOWS_RUNTIME_TREES = ("base", "release", "ui")
+WINDOWS_STAGE_REQUIRED_FILES = (
+    "dash-go-showcase-studio.exe",
+    "dash-go-showcase-studio.exe.manifest",
+    "STUDIO_RUNTIME.json",
+    WINDOWS_PAYLOAD_MANIFEST,
+    "NOTICE.md",
+    "LICENSE",
+    "DASH-GO-THIRD-PARTY-NOTICES.md",
+    "WHAT-STUDIO-DOES-LOCALLY.txt",
+    "assets/branding/dash-go-showcase-studio.ico",
+    "runtime/app/VERSION",
+    "runtime/app/index.html",
+    "runtime/app/themes.list",
+    "runtime/app/bin/dash-go-showcase-server.exe",
+    "runtime/app/bin/dash-go-showcase-server.exe.manifest",
+)
+WINDOWS_RUNTIME_PREFIXES = tuple(f"runtime/app/{name}/" for name in WINDOWS_RUNTIME_TREES)
+WINDOWS_DISALLOWED_SUFFIXES = frozenset({".bat", ".cmd", ".go", ".mjs", ".ps1", ".py", ".pyc", ".sh", ".test", ".zip", ".tar", ".gz"})
+WINDOWS_AS_INVOKER_MANIFEST = """<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>
+<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">
+  <trustInfo xmlns=\"urn:schemas-microsoft-com:asm.v3\">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level=\"asInvoker\" uiAccess=\"false\"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+</assembly>
+"""
+
 SHOWCASE_OVERLAY_GO_FILES = (
     "cmd/dashboard-control-server/showcase_mode.go",
     "cmd/dashboard-control-server/portable_runtime_unix.go",
@@ -455,32 +489,161 @@ def build_engine(ctx: Context, app: Path, target: str, output: Path) -> None:
     run(ctx, f"Build Showcase server {target}", [ctx.go, "build", "-trimpath", "-buildvcs=false", "-o", str(output), "./cmd/dashboard-control-server"], cwd=app, env=env, timeout=1200)
 
 
-def package_windows_stage(ctx: Context, staged_app: Path, host: Path, cli_host: Path, engine: Path) -> Path:
-    root = ctx.work / "payload" / "windows"
-    runtime_app = root / "runtime" / "app"
-    copy_tree_clean(staged_app, runtime_app)
-    remove_mutable_runtime_data(runtime_app, "Windows runtime package")
-    check_payload_tree(runtime_app, "Windows runtime package")
+def copy_windows_runtime_payload(staged_app: Path, runtime_app: Path, engine: Path) -> Path:
+    if runtime_app.exists():
+        shutil.rmtree(runtime_app)
+    runtime_app.mkdir(parents=True, exist_ok=True)
+    for name in WINDOWS_RUNTIME_ROOT_FILES:
+        source = staged_app / name
+        if not source.is_file():
+            raise BuildFailure("Windows runtime package", "Missing runtime asset", f"required Windows runtime file is missing: {name}")
+        shutil.copy2(source, runtime_app / name)
+    for name in WINDOWS_RUNTIME_TREES:
+        source = staged_app / name
+        if not source.is_dir():
+            raise BuildFailure("Windows runtime package", "Missing runtime asset", f"required Windows runtime tree is missing: {name}")
+        shutil.copytree(source, runtime_app / name, symlinks=False, copy_function=shutil.copy2)
     target_server = runtime_app / "bin" / "dash-go-showcase-server.exe"
     target_server.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(engine, target_server)
-    shutil.copy2(host, root / "dash-go-showcase-studio.exe")
-    shutil.copy2(cli_host, root / "dash-go-showcase-studio-cli.exe")
+    return target_server
+
+
+def write_windows_as_invoker_manifest(executable: Path) -> Path:
+    manifest = executable.with_name(executable.name + ".manifest")
+    manifest.write_text(WINDOWS_AS_INVOKER_MANIFEST, encoding="utf-8")
+    return manifest
+
+
+def is_allowed_windows_payload_path(relative: Path) -> bool:
+    value = relative.as_posix()
+    return value in WINDOWS_STAGE_REQUIRED_FILES or any(value.startswith(prefix) for prefix in WINDOWS_RUNTIME_PREFIXES)
+
+
+def windows_payload_inventory(root: Path, *, exclude_manifest: bool) -> list[dict[str, int | str]]:
+    rows: list[dict[str, int | str]] = []
+    for path in sorted((candidate for candidate in root.rglob("*") if candidate.is_file()), key=lambda candidate: candidate.as_posix()):
+        relative = path.relative_to(root).as_posix()
+        if exclude_manifest and relative == WINDOWS_PAYLOAD_MANIFEST:
+            continue
+        rows.append({"path": relative, "sha256": sha256(path), "sizeBytes": path.stat().st_size})
+    return rows
+
+
+def validate_windows_runtime_payload(runtime_app: Path, phase_name: str) -> None:
+    required = {
+        *WINDOWS_RUNTIME_ROOT_FILES,
+        "bin/dash-go-showcase-server.exe",
+        "bin/dash-go-showcase-server.exe.manifest",
+    }
+    found_files: set[str] = set()
+    for path in runtime_app.rglob("*"):
+        relative = path.relative_to(runtime_app)
+        value = relative.as_posix()
+        if path.is_symlink() or not (path.is_dir() or path.is_file()):
+            raise BuildFailure(phase_name, "Payload safety", f"Windows runtime payload contains unsupported filesystem entry: {value}")
+        if path.is_file():
+            found_files.add(value)
+            if value not in required and not any(value.startswith(f"{name}/") for name in WINDOWS_RUNTIME_TREES):
+                raise BuildFailure(phase_name, "Payload allowlist", f"Windows runtime payload contains unapproved file: {value}")
+            if path.suffix.lower() in WINDOWS_DISALLOWED_SUFFIXES:
+                raise BuildFailure(phase_name, "Payload allowlist", f"Windows runtime payload contains excluded development or script file: {value}")
+    missing = sorted(required - found_files)
+    if missing:
+        raise BuildFailure(phase_name, "Payload allowlist", "Windows runtime payload is missing required files: " + ", ".join(missing))
+    for tree in WINDOWS_RUNTIME_TREES:
+        if not any(path.is_file() for path in (runtime_app / tree).rglob("*")):
+            raise BuildFailure(phase_name, "Payload allowlist", f"Windows runtime payload tree is empty: {tree}")
+
+
+def write_windows_payload_manifest(root: Path) -> Path:
+    manifest = root / WINDOWS_PAYLOAD_MANIFEST
+    write_json(manifest, {
+        "schema": 1,
+        "payloadLayout": WINDOWS_PAYLOAD_LAYOUT,
+        "platform": "windows-amd64",
+        "selfExcluded": True,
+        "files": windows_payload_inventory(root, exclude_manifest=True),
+    })
+    return manifest
+
+
+def validate_windows_stage_payload(root: Path, phase_name: str) -> None:
+    for path in root.rglob("*"):
+        relative = path.relative_to(root)
+        value = relative.as_posix()
+        if path.is_symlink() or not (path.is_dir() or path.is_file()):
+            raise BuildFailure(phase_name, "Payload safety", f"Windows stage contains unsupported filesystem entry: {value}")
+        if path.is_file():
+            if not is_allowed_windows_payload_path(relative):
+                raise BuildFailure(phase_name, "Payload allowlist", f"Windows stage contains unapproved file: {value}")
+            if path.suffix.lower() in WINDOWS_DISALLOWED_SUFFIXES:
+                raise BuildFailure(phase_name, "Payload allowlist", f"Windows stage contains excluded development or script file: {value}")
+    missing = [value for value in WINDOWS_STAGE_REQUIRED_FILES if not (root / value).is_file()]
+    if missing:
+        raise BuildFailure(phase_name, "Payload allowlist", "Windows stage is missing required files: " + ", ".join(missing))
+    runtime_app = root / "runtime" / "app"
+    validate_windows_runtime_payload(runtime_app, phase_name)
+    executable_paths = sorted(path.relative_to(root).as_posix() for path in root.rglob("*.exe"))
+    expected_executables = ["dash-go-showcase-studio.exe", "runtime/app/bin/dash-go-showcase-server.exe"]
+    if executable_paths != expected_executables:
+        raise BuildFailure(phase_name, "Payload allowlist", f"Windows stage executables must be exactly {expected_executables}, found {executable_paths}")
+    for executable in expected_executables:
+        manifest = root / f"{executable}.manifest"
+        text = manifest.read_text(encoding="utf-8")
+        if 'requestedExecutionLevel level="asInvoker" uiAccess="false"' not in text:
+            raise BuildFailure(phase_name, "Windows manifest", f"Windows executable manifest is not explicit asInvoker/uiAccess=false: {manifest.relative_to(root)}")
+    metadata = json.loads((root / "STUDIO_RUNTIME.json").read_text(encoding="utf-8"))
+    if metadata.get("payloadLayout") != WINDOWS_PAYLOAD_LAYOUT or metadata.get("payloadManifest") != WINDOWS_PAYLOAD_MANIFEST:
+        raise BuildFailure(phase_name, "Payload metadata", "STUDIO_RUNTIME.json does not identify the curated Windows payload")
+    manifest = json.loads((root / WINDOWS_PAYLOAD_MANIFEST).read_text(encoding="utf-8"))
+    if manifest.get("schema") != 1 or manifest.get("payloadLayout") != WINDOWS_PAYLOAD_LAYOUT or manifest.get("platform") != "windows-amd64" or manifest.get("selfExcluded") is not True:
+        raise BuildFailure(phase_name, "Payload manifest", "INSTALLER_CONTENTS.json has an invalid curated Windows payload header")
+    expected = windows_payload_inventory(root, exclude_manifest=True)
+    if manifest.get("files") != expected:
+        raise BuildFailure(phase_name, "Payload manifest", "INSTALLER_CONTENTS.json does not exactly describe the curated Windows stage")
+
+
+def package_windows_stage(ctx: Context, staged_app: Path, host: Path, engine: Path) -> Path:
+    root = ctx.work / "payload" / "windows"
+    if root.exists():
+        shutil.rmtree(root)
+    runtime_app = root / "runtime" / "app"
+    target_server = copy_windows_runtime_payload(staged_app, runtime_app, engine)
+    target_host = root / "dash-go-showcase-studio.exe"
+    root.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(host, target_host)
+    write_windows_as_invoker_manifest(target_host)
+    write_windows_as_invoker_manifest(target_server)
     windows_icon = ctx.source / "assets" / "branding" / "dash-go-showcase-studio.ico"
     if not windows_icon.is_file() or windows_icon.read_bytes()[:4] != b"\0\0\1\0":
         raise BuildFailure("Windows package", "Branding", "missing or invalid Windows Studio icon")
     icon_target = root / "assets" / "branding" / windows_icon.name
     icon_target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(windows_icon, icon_target)
-    for name in ("NOTICE.md", "LICENSE", "DASH-GO-THIRD-PARTY-NOTICES.md"):
-        shutil.copy2(ctx.source / name, root / name)
-    write_json(root / "STUDIO_RUNTIME.json", {"schema": 1, "studioVersion": ctx.version, "releasePackageVersion": ctx.release_package_version, "dashGoVersion": ctx.dashgo_version, "fixtureSchema": ctx.manifest["fixtureSchema"], "scenarioCatalog": ctx.manifest["scenarioCatalog"], "platform": "windows-amd64", "builtAt": now_utc()})
-    if target_server.read_bytes()[:2] != b"MZ" or (root / "dash-go-showcase-studio.exe").read_bytes()[:2] != b"MZ" or (root / "dash-go-showcase-studio-cli.exe").read_bytes()[:2] != b"MZ":
-        raise BuildFailure("", "Architecture inspection", "Windows payload does not contain all required PE executables")
-    if pe_subsystem(root / "dash-go-showcase-studio.exe") != 2:
+    for name in ("NOTICE.md", "LICENSE", "DASH-GO-THIRD-PARTY-NOTICES.md", "WHAT-STUDIO-DOES-LOCALLY.txt"):
+        source = ctx.source / name
+        if not source.is_file():
+            raise BuildFailure("Windows package", "Documentation", f"required public Windows package document is missing: {name}")
+        shutil.copy2(source, root / name)
+    write_json(root / "STUDIO_RUNTIME.json", {
+        "schema": 1,
+        "studioVersion": ctx.version,
+        "releasePackageVersion": ctx.release_package_version,
+        "dashGoVersion": ctx.dashgo_version,
+        "fixtureSchema": ctx.manifest["fixtureSchema"],
+        "scenarioCatalog": ctx.manifest["scenarioCatalog"],
+        "platform": "windows-amd64",
+        "payloadLayout": WINDOWS_PAYLOAD_LAYOUT,
+        "payloadManifest": WINDOWS_PAYLOAD_MANIFEST,
+        "builtAt": now_utc(),
+    })
+    write_windows_payload_manifest(root)
+    if target_server.read_bytes()[:2] != b"MZ" or target_host.read_bytes()[:2] != b"MZ":
+        raise BuildFailure("Windows package", "Architecture inspection", "Windows payload does not contain the required PE executables")
+    if pe_subsystem(target_host) != 2:
         raise BuildFailure("Windows launcher inspection", "PE subsystem", "user-facing Studio launcher must use the Windows GUI subsystem")
-    if pe_subsystem(root / "dash-go-showcase-studio-cli.exe") != 3:
-        raise BuildFailure("Windows launcher inspection", "PE subsystem", "Studio CLI companion must use the Windows console subsystem")
+    validate_windows_stage_payload(root, "Windows package")
     return root
 
 
@@ -689,15 +852,10 @@ def main() -> int:
                     "host": directory / f"dash-go-showcase-studio{suffix}",
                 }
                 jobs.extend(((target, "engine", built_map[target]["engine"]), (target, "host", built_map[target]["host"])))
-                if target == "windows":
-                    built_map[target]["cli"] = directory / "dash-go-showcase-studio-cli.exe"
-                    jobs.append((target, "cli", built_map[target]["cli"]))
             def build_unit(item: tuple[str, str, Path]) -> None:
                 target, kind, output = item
                 if kind == "engine":
                     build_engine(ctx, app, target, output)
-                elif kind == "cli":
-                    build_host(ctx, target, output, gui=False)
                 else:
                     build_host(ctx, target, output, gui=(target == "windows"))
             with concurrent.futures.ThreadPoolExecutor(max_workers=min(ctx.plan.cross_workers, len(jobs))) as pool:
@@ -713,7 +871,7 @@ def main() -> int:
             with concurrent.futures.ThreadPoolExecutor(max_workers=min(2, ctx.plan.cross_workers)) as pool:
                 if "windows" in ctx.targets:
                     windows_entry = built_map["windows"]
-                    futures["windows"] = pool.submit(package_windows_stage, ctx, app, windows_entry["host"], windows_entry["cli"], windows_entry["engine"])
+                    futures["windows"] = pool.submit(package_windows_stage, ctx, app, windows_entry["host"], windows_entry["engine"])
                 if "linux" in ctx.targets:
                     linux_entry = built_map["linux"]
                     futures["linux"] = pool.submit(package_linux, ctx, app, linux_entry["host"], linux_entry["engine"])

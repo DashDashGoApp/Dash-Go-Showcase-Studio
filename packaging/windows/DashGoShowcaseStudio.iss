@@ -17,6 +17,9 @@
 #ifndef OutputDir
   #error OutputDir must be supplied by the Builder.
 #endif
+#ifndef VersionInfoVersion
+  #error VersionInfoVersion must be supplied by the Builder.
+#endif
 
 #define StudioName "Dash-Go Showcase Studio"
 #define StudioExe "dash-go-showcase-studio.exe"
@@ -48,14 +51,24 @@ AppVersion={#ReleasePackageVersion}
 AppVerName={#StudioName} for Dash-Go {#ReleasePackageVersion}
 AppPublisher=DashDashGoApp
 AppPublisherURL=https://github.com/DashDashGoApp
+AppSupportURL=https://github.com/DashDashGoApp/Dash-Go-Showcase-Studio/issues
+AppUpdatesURL=https://github.com/DashDashGoApp/Dash-Go-Showcase-Studio/releases
 DefaultGroupName=Dash-Go Showcase Studio
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
 OutputDir={#OutputDir}
 OutputBaseFilename=Dash-Go_Showcase_Studio_{#ReleasePackageVersion}_Windows_Setup
-Compression=lzma2/ultra64
-SolidCompression=yes
+Compression=lzma2/max
+SolidCompression=no
+VersionInfoCompany=DashDashGoApp
+VersionInfoDescription=Dash-Go Showcase Studio Installer
+VersionInfoVersion={#VersionInfoVersion}
+VersionInfoTextVersion={#ReleasePackageVersion}
+VersionInfoProductName={#StudioName}
+VersionInfoProductVersion={#VersionInfoVersion}
+VersionInfoProductTextVersion={#ReleasePackageVersion}
+VersionInfoOriginalFileName=Dash-Go_Showcase_Studio_{#ReleasePackageVersion}_Windows_Setup.exe
+VersionInfoCopyright=Copyright (C) 2026 DashDashGoApp
 WizardStyle=modern
 SetupIconFile={#StageDir}\assets\branding\dash-go-showcase-studio.ico
 UninstallDisplayIcon={app}\assets\branding\dash-go-showcase-studio.ico
@@ -70,7 +83,24 @@ RestartApplications=no
 Name: desktopicon; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Files]
-Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; The public Windows payload is an explicit allowlist. Never package the entire stage tree.
+Source: "{#StageDir}\dash-go-showcase-studio.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StageDir}\dash-go-showcase-studio.exe.manifest"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StageDir}\STUDIO_RUNTIME.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StageDir}\INSTALLER_CONTENTS.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StageDir}\NOTICE.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StageDir}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StageDir}\DASH-GO-THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StageDir}\WHAT-STUDIO-DOES-LOCALLY.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StageDir}\assets\branding\dash-go-showcase-studio.ico"; DestDir: "{app}\assets\branding"; Flags: ignoreversion
+Source: "{#StageDir}\runtime\app\VERSION"; DestDir: "{app}\runtime\app"; Flags: ignoreversion
+Source: "{#StageDir}\runtime\app\index.html"; DestDir: "{app}\runtime\app"; Flags: ignoreversion
+Source: "{#StageDir}\runtime\app\themes.list"; DestDir: "{app}\runtime\app"; Flags: ignoreversion
+Source: "{#StageDir}\runtime\app\bin\dash-go-showcase-server.exe"; DestDir: "{app}\runtime\app\bin"; Flags: ignoreversion
+Source: "{#StageDir}\runtime\app\bin\dash-go-showcase-server.exe.manifest"; DestDir: "{app}\runtime\app\bin"; Flags: ignoreversion
+Source: "{#StageDir}\runtime\app\base\*"; DestDir: "{app}\runtime\app\base"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#StageDir}\runtime\app\release\*"; DestDir: "{app}\runtime\app\release"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#StageDir}\runtime\app\ui\*"; DestDir: "{app}\runtime\app\ui"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\Dash-Go Showcase Studio"; Filename: "{app}\{#StudioExe}"; WorkingDir: "{app}"; IconFilename: "{app}\assets\branding\dash-go-showcase-studio.ico"; Comment: "Explore Dash-Go with safe local showcase data"
@@ -81,9 +111,9 @@ Filename: "{app}\{#StudioExe}"; Description: "Launch Dash-Go Showcase Studio"; F
 
 [UninstallRun]
 #ifdef SmokeTest
-Filename: "{app}\{#StudioExe}"; Parameters: "--action purge --state-root ""{#SmokeStateRoot}"" --confirm-purge ""PURGE SHOWCASE STUDIO"""; Flags: runhidden waituntilterminated skipifdoesntexist
+Filename: "{app}\{#StudioExe}"; Parameters: "--action purge --state-root ""{#SmokeStateRoot}"" --confirm-purge ""PURGE SHOWCASE STUDIO"""; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "DashGoShowcaseStudioSmokePurge"
 #else
-Filename: "{app}\{#StudioExe}"; Parameters: "--action purge"; Flags: runhidden waituntilterminated skipifdoesntexist
+Filename: "{app}\{#StudioExe}"; Parameters: "--action purge"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "DashGoShowcaseStudioPurge"
 #endif
 
 [UninstallDelete]

@@ -455,6 +455,21 @@ jobs:
           if ([string]$packageSummary.releasePackageVersion -ne $env:RELEASE_PACKAGE_VERSION) {
               throw 'Windows package helper release package version does not match Prepublication candidate provenance.'
           }
+          if ([int]$packageSummary.schema -ne 2 -or
+              [string]$packageSummary.payloadLayout -ne 'windows-curated-v1' -or
+              [string]$packageSummary.payloadManifest -ne 'INSTALLER_CONTENTS.json' -or
+              [int]$packageSummary.payloadFileCount -lt 1 -or
+              [int]$packageSummary.installedPayloadFileCount -ne [int]$packageSummary.payloadFileCount) {
+              throw 'Windows package helper did not prove the curated Windows payload contract.'
+          }
+          $payloadManifestOutput = Join-Path $outputRoot ([string]$packageSummary.payloadManifest)
+          if (-not (Test-Path -LiteralPath $payloadManifestOutput -PathType Leaf)) {
+              throw 'Windows package helper did not retain INSTALLER_CONTENTS.json with the candidate artifact.'
+          }
+          $actualPayloadManifestSha256 = (Get-FileHash -LiteralPath $payloadManifestOutput -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualPayloadManifestSha256 -ne [string]$packageSummary.payloadManifestSha256) {
+              throw 'Retained INSTALLER_CONTENTS.json does not match the package helper summary.'
+          }
           $expectedInstallerName = 'Dash-Go_Showcase_Studio_{0}_Windows_Setup.exe' -f $env:RELEASE_PACKAGE_VERSION
           if ([string]$packageSummary.installer -ne $expectedInstallerName) {
               throw "Windows package helper emitted unexpected installer name: $($packageSummary.installer)."
@@ -475,6 +490,10 @@ jobs:
               dashGoVersion = [string]$stageProvenance.dashGoVersion
               releasePackageVersion = $env:RELEASE_PACKAGE_VERSION
               installerName = [string]$packageSummary.installer
+              payloadLayout = [string]$packageSummary.payloadLayout
+              payloadManifest = [string]$packageSummary.payloadManifest
+              payloadManifestSha256 = [string]$packageSummary.payloadManifestSha256
+              payloadFileCount = [int]$packageSummary.payloadFileCount
               dashGoSourceSha256 = [string]$stageProvenance.dashGoSourceSha256
               dashGoRelease = $stageProvenance.dashGoRelease
               innoVersion = $env:INNO_VERSION

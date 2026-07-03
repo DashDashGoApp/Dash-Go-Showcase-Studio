@@ -57,14 +57,21 @@ func (a *App) prepareScenarioForLocation(scenarioID, locationID string) error {
 	if err := os.MkdirAll(stageHome, 0700); err != nil {
 		return fmt.Errorf("create staged Showcase home: %w", err)
 	}
-	if err := a.runRuntimeCLI(stageApp, stageHome, "--setup-demo-mode", "--reset"); err != nil {
-		return fmt.Errorf("seed baseline Dash-Go fixture: %w", err)
+	// Studio fixtures own this disposable staging data. The pinned Dash-Go
+	// runtime's maintenance CLI is skipped on Windows because its durable
+	// parent-directory sync is denied in the GitHub-hosted staged workspace.
+	if runtime.GOOS != "windows" {
+		if err := a.runRuntimeCLI(stageApp, stageHome, "--setup-demo-mode", "--reset"); err != nil {
+			return fmt.Errorf("seed baseline Dash-Go fixture: %w", err)
+		}
 	}
 	if err := fixtures.SeedForLocation(stageApp, stageHome, scenario.ID, locationID, time.Now()); err != nil {
 		return fmt.Errorf("seed %s: %w", scenario.Title, err)
 	}
-	if err := a.runRuntimeCLI(stageApp, stageHome, "--gen-calendars"); err != nil {
-		return fmt.Errorf("generate owned household calendars: %w", err)
+	if runtime.GOOS != "windows" {
+		if err := a.runRuntimeCLI(stageApp, stageHome, "--gen-calendars"); err != nil {
+			return fmt.Errorf("generate owned household calendars: %w", err)
+		}
 	}
 	if err := fixtures.WriteRuntimeMarker(stage, scenario.ID, locationID, time.Now()); err != nil {
 		return fmt.Errorf("write Showcase marker: %w", err)

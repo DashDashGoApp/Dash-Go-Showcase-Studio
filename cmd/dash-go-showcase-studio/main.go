@@ -20,6 +20,10 @@ func main() {
 	flag.BoolVar(&options.Trace, "trace", false, "print detailed host diagnostics")
 	flag.Parse()
 
+	if options.Action != "start" {
+		_ = os.Setenv("DASHGO_SHOWCASE_CLI", "1")
+	}
+
 	app, err := studiohost.New(options)
 	if err != nil {
 		studiohost.ReportStartupError("Dash-Go Showcase Studio could not start", err)

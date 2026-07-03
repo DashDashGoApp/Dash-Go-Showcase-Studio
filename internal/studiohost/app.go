@@ -173,21 +173,36 @@ func validatePurgeRequest(stateRoot string, customRoot bool, confirmation string
 
 func (a *App) selfTest() error {
 	scenario := a.selectedScenario()
+
+	if a.options.Trace {
+		fmt.Fprintf(os.Stderr, "TRACE self-test: prepare scenario %s\n", scenario)
+	}
 	if err := a.prepareScenarioForLocation(scenario, a.selectedLocation()); err != nil {
 		return err
+	}
+
+	if a.options.Trace {
+		fmt.Fprintln(os.Stderr, "TRACE self-test: start runtime")
 	}
 	runtime, err := a.startRuntime()
 	if err != nil {
 		return err
 	}
 	defer a.stopRuntime(runtime)
+
+	if a.options.Trace {
+		fmt.Fprintln(os.Stderr, "TRACE self-test: verify readiness")
+	}
 	if err := a.assertReady(runtime.url); err != nil {
 		return err
+	}
+
+	if a.options.Trace {
+		fmt.Fprintln(os.Stderr, "TRACE self-test: completed")
 	}
 	fmt.Printf("PASS: Showcase self-test completed for %s\n", scenario)
 	return nil
 }
-
 func (a *App) ensureStateRoot() error {
 	for _, path := range []string{a.paths.stateRoot, a.paths.logsRoot} {
 		if err := os.MkdirAll(path, 0755); err != nil {

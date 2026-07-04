@@ -367,6 +367,31 @@ def apply(app: Path) -> None:
 ''',
     )
 
+    public_post = cmd / "http_routes_public_post.go"
+    replace_once(
+        public_post,
+        '''	if path == "/api/calendar/event/create" || path == "/api/calendar/event/update" || path == "/api/calendar/event/occurrence/update" || path == "/api/calendar/event/series/update" || path == "/api/calendar/event/skip-occurrence" {
+''',
+        '''	// Studio has no user PIN or remote provider. Permit deletion only for the
+	// exact disposable session collections; every normal Dashboard delete still
+	// follows the authenticated route below.
+	if path == "/api/calendar/event/delete" && a.showcaseMode() && a.showcaseWritableCalendarSource(jsonutil.BodyString(body, "calUrl")) {
+		result, err := a.handleCalendarWritebackMutation(path, body)
+		if err != nil {
+			code := http.StatusBadRequest
+			if strings.Contains(err.Error(), "already running") {
+				code = http.StatusConflict
+			}
+			a.err(w, err.Error(), code)
+		} else {
+			a.json(w, result)
+		}
+		return true
+	}
+	if path == "/api/calendar/event/create" || path == "/api/calendar/event/update" || path == "/api/calendar/event/occurrence/update" || path == "/api/calendar/event/series/update" || path == "/api/calendar/event/skip-occurrence" {
+''',
+    )
+
     calendar_writeback = cmd / "calendar_writeback.go"
     replace_once(
         calendar_writeback,
@@ -878,6 +903,21 @@ func TestShowcaseOnlyAllowsItsThreeSessionWritableCalendars(t *testing.T) {
 	for _, source := range []string{"calendars/school.blue.ics", "calendars/chore-wheel.ics", "calendars/routines.ics", "calendars/maintenance.ics", "calendars/unknown.ics"} {
 		if a.showcaseWritableCalendarSource(source) {
 			t.Fatalf("unexpected Studio session-write permission for %s", source)
+		}
+	}
+}
+
+func TestShowcaseSessionDeleteIsLimitedToWritableCalendars(t *testing.T) {
+	t.Setenv("DASHGO_SHOWCASE", "1")
+	a := &app{}
+	for _, source := range []string{"calendars/family.green.ics", "calendars/home.amber.ics", "calendars/plans.violet.ics"} {
+		if !a.calendarWritebackDeleteAllowed(source) {
+			t.Fatalf("expected Studio session delete permission for %s", source)
+		}
+	}
+	for _, source := range []string{"calendars/school.blue.ics", "calendars/chore-wheel.ics", "calendars/unknown.ics"} {
+		if a.calendarWritebackDeleteAllowed(source) {
+			t.Fatalf("unexpected Studio session delete permission for %s", source)
 		}
 	}
 }

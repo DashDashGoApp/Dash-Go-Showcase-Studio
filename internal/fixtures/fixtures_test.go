@@ -1,6 +1,7 @@
 package fixtures
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -29,6 +30,7 @@ func TestRealityLayerSeedsSevenBrowserCalendarsAndSessionWriteback(t *testing.T)
 		"config/maintenance-tracker.json",
 		"config/household-schedules.json",
 		"config/calendar-writeback.json",
+		"config/showcase-session-calendar.json",
 		"config/todo/_lists.json",
 		"calendars/calendars.json",
 		"calendars/family.green.ics",
@@ -82,8 +84,8 @@ func TestRealityLayerSeedsSevenBrowserCalendarsAndSessionWriteback(t *testing.T)
 	for rel, markers := range map[string][]string{
 		"family.green.ics": {"SUMMARY:Family meal plan", "RRULE:FREQ=WEEKLY;BYDAY=SU", "SUMMARY:Lake cabin weekend", "RECURRENCE-ID:", "DESCRIPTION:Review the coming week"},
 		"school.blue.ics":  {"SUMMARY:Summer learning camp", "SUMMARY:Library maker lab", "LOCATION:Harold Washington Library Center"},
-		"home.amber.ics":   {"SUMMARY:Grocery pickup", "RRULE:FREQ=WEEKLY;BYDAY=TH", "LOCATION:Whole Foods Market"},
-		"plans.violet.ics": {"SUMMARY:Saturday farmers market", "RRULE:FREQ=WEEKLY;BYDAY=SA", "EXDATE:", "SUMMARY:Food pantry volunteer shift", "LOCATION:Greater Chicago Food Depository"},
+		"home.amber.ics":   {"SUMMARY:Set out trash and recycling", "SUMMARY:Trash pickup", "RRULE:FREQ=WEEKLY;BYDAY=TU", "LOCATION:Whole Foods Market"},
+		"plans.violet.ics": {"SUMMARY:Payday", "RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=FR", "SUMMARY:Saturday farmers market", "RRULE:FREQ=WEEKLY;BYDAY=SA", "EXDATE:", "SUMMARY:Food pantry volunteer shift", "LOCATION:Greater Chicago Food Depository"},
 		"chore-wheel.ics":  {"SUMMARY:Kitchen reset —", "SUMMARY:Take out recycling —"},
 		"routines.ics":     {"SUMMARY:Morning ready — Avery", "SUMMARY:Sunday reset — Jordan"},
 		"maintenance.ics":  {"SUMMARY:Test smoke detectors", "SUMMARY:Replace HVAC filter"},
@@ -120,10 +122,13 @@ func TestRealityLayerSeedsSevenBrowserCalendarsAndSessionWriteback(t *testing.T)
 			Collection string `json:"collection"`
 			Writable   bool   `json:"writable"`
 			Enabled    bool   `json:"enabled"`
+			Name       string `json:"name,omitempty"`
 		} `json:"calendars"`
 	}
-	if err := json.Unmarshal(writebackBytes, &writeback); err != nil {
-		t.Fatalf("parse calendar writeback registry: %v", err)
+	decoder := json.NewDecoder(bytes.NewReader(writebackBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&writeback); err != nil {
+		t.Fatalf("parse strict calendar writeback registry: %v", err)
 	}
 	if writeback.Version != 2 || !writeback.Enabled || writeback.RequirePIN || len(writeback.Calendars) != 3 {
 		t.Fatalf("unexpected Studio writeback registry: %#v", writeback)
@@ -147,6 +152,23 @@ func TestRealityLayerSeedsSevenBrowserCalendarsAndSessionWriteback(t *testing.T)
 		t.Fatalf("Studio writeback registry is missing: %#v", wantWritable)
 	}
 
+	sessionBytes, err := os.ReadFile(filepath.Join(app, "config", "showcase-session-calendar.json"))
+	if err != nil {
+		t.Fatalf("read Studio session calendar metadata: %v", err)
+	}
+	var sessionMeta struct {
+		Schema          int      `json:"schema"`
+		SessionOnly     bool     `json:"sessionOnly"`
+		ResetsOnClose   bool     `json:"resetsOnClose"`
+		WritableSources []string `json:"writableSources"`
+	}
+	if err := json.Unmarshal(sessionBytes, &sessionMeta); err != nil {
+		t.Fatalf("parse Studio session calendar metadata: %v", err)
+	}
+	if sessionMeta.Schema != 1 || !sessionMeta.SessionOnly || !sessionMeta.ResetsOnClose || len(sessionMeta.WritableSources) != 3 {
+		t.Fatalf("unexpected Studio session calendar metadata: %#v", sessionMeta)
+	}
+
 	if _, err := os.Stat(filepath.Join(home, ".dashboard-family-board.json")); err != nil {
 		t.Fatal(err)
 	}
@@ -168,8 +190,10 @@ func TestRealityLayerCalendarDatesFollowHouseholdRules(t *testing.T) {
 		weekday     time.Weekday
 	}{
 		{"plans.violet.ics", "Saturday farmers market", time.Saturday},
+		{"home.amber.ics", "Set out trash and recycling", time.Monday},
 		{"home.amber.ics", "Trash pickup", time.Tuesday},
 		{"home.amber.ics", "Recycling pickup", time.Tuesday},
+		{"plans.violet.ics", "Payday", time.Friday},
 		{"family.green.ics", "Family meal plan", time.Sunday},
 		{"family.green.ics", "Piano practice", time.Wednesday},
 	} {
@@ -190,10 +214,20 @@ func TestRealityLayerCalendarDatesFollowHouseholdRules(t *testing.T) {
 	}
 
 	plans := byFile["plans.violet.ics"]
+	var paydayFound bool
 	for _, event := range plans.Events {
 		if event.Title == "Saturday farmers market" && len(event.ExDates) != 1 {
 			t.Fatalf("Saturday market must include one deliberate skipped occurrence: %#v", event)
 		}
+		if event.Title == "Payday" {
+			paydayFound = true
+			if event.RRULE != "FREQ=WEEKLY;INTERVAL=2;BYDAY=FR;COUNT=24" {
+				t.Fatalf("unexpected payday recurrence: %#v", event)
+			}
+		}
+	}
+	if !paydayFound {
+		t.Fatal("missing recurring payday event")
 	}
 
 	family := byFile["family.green.ics"]

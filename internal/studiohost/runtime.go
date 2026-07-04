@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -118,6 +119,14 @@ func (a *App) startRuntime() (*runningRuntime, error) {
 		}
 		return nil, fmt.Errorf("Showcase server did not become ready: %w", err)
 	}
+	if err := a.assertClientVisibleScenarioData(runtime.url); err != nil {
+		a.stopRuntime(runtime)
+		tail, _ := tailFile(logPath, 80*1024)
+		if tail != "" {
+			return nil, fmt.Errorf("Showcase server did not expose the active scenario data; refusing to open an empty Studio session: %w\n%s", err, tail)
+		}
+		return nil, fmt.Errorf("Showcase server did not expose the active scenario data; refusing to open an empty Studio session: %w", err)
+	}
 	a.mu.Lock()
 	a.runtime = runtime
 	a.mu.Unlock()
@@ -180,6 +189,52 @@ func (a *App) assertReady(baseURL string) error {
 		last = fmt.Errorf("readiness timed out")
 	}
 	return last
+}
+
+type clientVisibleScenarioData struct {
+	Path      string
+	Contains  string
+	ParseJSON bool
+}
+
+var requiredClientVisibleScenarioData = []clientVisibleScenarioData{
+	{Path: "/config/config.local.js", Contains: "Generated for Dash-Go Showcase Studio"},
+	{Path: "/config/compliments.json", Contains: "studio-normal", ParseJSON: true},
+	{Path: "/calendars/calendars.json", Contains: "calendars/showcase-studio.ics", ParseJSON: true},
+	{Path: "/calendars/showcase-studio.ics", Contains: "SUMMARY:Breakfast together"},
+	{Path: "/api/weather", Contains: "showcase-fixture", ParseJSON: true},
+}
+
+// assertClientVisibleScenarioData verifies the exact files and local endpoint
+// the browser consumes. Readiness alone only proves that the server bound its
+// loopback port; it does not prove that the disposable scenario root and
+// offline preview data are visible to the dashboard UI.
+func (a *App) assertClientVisibleScenarioData(baseURL string) error {
+	client := &http.Client{Timeout: 1500 * time.Millisecond}
+	for _, probe := range requiredClientVisibleScenarioData {
+		response, err := client.Get(baseURL + probe.Path)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", probe.Path, err)
+		}
+		body, readErr := io.ReadAll(io.LimitReader(response.Body, 256*1024))
+		_ = response.Body.Close()
+		if readErr != nil {
+			return fmt.Errorf("read %s response: %w", probe.Path, readErr)
+		}
+		if response.StatusCode != http.StatusOK {
+			return fmt.Errorf("%s returned HTTP %d", probe.Path, response.StatusCode)
+		}
+		if probe.ParseJSON {
+			var decoded any
+			if err := json.Unmarshal(body, &decoded); err != nil {
+				return fmt.Errorf("%s did not return JSON: %w", probe.Path, err)
+			}
+		}
+		if !bytes.Contains(body, []byte(probe.Contains)) {
+			return fmt.Errorf("%s did not contain the required Showcase fixture marker", probe.Path)
+		}
+	}
+	return nil
 }
 
 func chooseLoopbackPort() (int, error) {

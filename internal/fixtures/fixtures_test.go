@@ -18,10 +18,14 @@ func TestScenariosAreStableAndSeededLocally(t *testing.T) {
 	if err := Seed(app, home, DefaultScenario, time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
-	for _, rel := range []string{"config/household-people.json", "config/chore-wheel.json", "config/household-schedules.json", "config/todo/_lists.json", "calendars/showcase-studio.ics"} {
+	for _, rel := range []string{"config/household-people.json", "config/chore-wheel.json", "config/household-schedules.json", "config/todo/_lists.json", "calendars/calendars.json", "calendars/showcase-studio.ics"} {
 		if _, err := os.Stat(filepath.Join(app, rel)); err != nil {
 			t.Fatalf("missing %s: %v", rel, err)
 		}
+	}
+	manifest, err := os.ReadFile(filepath.Join(app, "calendars", "calendars.json"))
+	if err != nil || !contains(string(manifest), "calendars/showcase-studio.ics") {
+		t.Fatalf("browser calendar manifest is missing the Showcase fixture: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".dashboard-family-board.json")); err != nil {
 		t.Fatal(err)

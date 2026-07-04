@@ -109,13 +109,50 @@ func TestAssertClientVisibleScenarioData(t *testing.T) {
 	}
 }
 
+func TestAssertClientVisibleScenarioDataRetriesTransientFixtureVisibility(t *testing.T) {
+	responses := map[string]string{
+		"/config/config.local.js":        "// Generated for Dash-Go Showcase Studio.\n",
+		"/config/compliments.json":       `{"messages":[{"origin":"studio-normal"}]}`,
+		"/calendars/calendars.json":      `[{"url":"calendars/showcase-studio.ics"}]`,
+		"/calendars/showcase-studio.ics": "BEGIN:VCALENDAR\r\nSUMMARY:Breakfast together\r\nEND:VCALENDAR\r\n",
+		"/api/weather":                   `{"source":"showcase-fixture","sources":[{"_source":"showcase"}]}`,
+	}
+	configRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/config/config.local.js" {
+			configRequests++
+			if configRequests < 3 {
+				http.NotFound(w, r)
+				return
+			}
+		}
+		body, ok := responses[r.URL.Path]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Path == "/config/compliments.json" || r.URL.Path == "/calendars/calendars.json" || r.URL.Path == "/api/weather" {
+			w.Header().Set("Content-Type", "application/json")
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	if err := assertClientVisibleScenarioDataWithRetry(server.URL, 3, time.Millisecond, func(time.Duration) {}); err != nil {
+		t.Fatalf("assertClientVisibleScenarioDataWithRetry returned error: %v", err)
+	}
+	if configRequests != 3 {
+		t.Fatalf("config requests=%d, want 3", configRequests)
+	}
+}
+
 func TestAssertClientVisibleScenarioDataRejectsFallbackContent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("{}"))
 	}))
 	defer server.Close()
 
-	if err := (&App{}).assertClientVisibleScenarioData(server.URL); err == nil {
+	if err := assertClientVisibleScenarioDataWithRetry(server.URL, 1, 0, nil); err == nil {
 		t.Fatal("assertClientVisibleScenarioData accepted a missing fixture marker")
 	}
 }

@@ -449,7 +449,9 @@ def showcase_tour_guard_view_contract(ctx: Context, app: Path) -> None:
     for token in (
         "/api/viewport",
         "Clean View",
-        "Fit Display",
+        "Presentation Fit",
+        "Use this display · high-DPI",
+        "Device previews emulate exact CSS viewports.",
         "wall-landscape",
         "laptop",
         "wide-tablet",

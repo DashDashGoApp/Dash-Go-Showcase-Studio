@@ -23,8 +23,8 @@ type Scenario struct {
 }
 
 var scenarios = []Scenario{
-	{ID: "everyday-household", Title: "Everyday Household", Kind: "START HERE", Description: "A polished family dashboard with a varied calendar, household messages, To Do, Grocery, weather-ready settings, and active routines."},
-	{ID: "busy-calendar", Title: "Busy Calendar", Kind: "CALENDAR", Description: "Dense overlapping events, all-day plans, locations, multi-day travel, and a full day-timeline exploration path."},
+	{ID: "everyday-household", Title: "Everyday Household", Kind: "START HERE", Description: "A polished family dashboard with a full calendar gallery: multiday plans, household chores, routines, maintenance, messages, To Do, Grocery, and weather-ready settings."},
+	{ID: "busy-calendar", Title: "Busy Calendar", Kind: "CALENDAR", Description: "A full calendar gallery with color-coded feeds, all-day spans, chores, routines, maintenance, locations, and a dense day-timeline exploration path."},
 	{ID: "family-flow", Title: "Family Flow", Kind: "HOUSEHOLD", Description: "People, private inboxes, Chore Wheel assignments, routines, maintenance, and correction-friendly completion examples."},
 	{ID: "household-schedules", Title: "Household Schedules", Kind: "SCHEDULES", Description: "Payday, trash, and recycling rules with generated occurrences and a one-time adjustment example."},
 	{ID: "tasks-grocery", Title: "Tasks & Grocery", Kind: "LISTS", Description: "Local To Do and Grocery boards with open, completed, and assigned household items—no cloud account required."},
@@ -206,12 +206,30 @@ func seedChores(config string, people []map[string]any, today time.Time, now tim
 		map[string]any{"id": "recycling", "name": "Take out recycling", "createdAt": now.Add(-24 * time.Hour).Format(time.RFC3339), "cadence": map[string]any{"type": "weekly", "day": int(today.Weekday()), "every": 1, "anchorDate": dateText(today.AddDate(0, 0, -7))}, "effort": 2, "eligible": []string{"avery", "jordan"}},
 		map[string]any{"id": "litter", "name": "Refresh litter box", "createdAt": now.Add(-24 * time.Hour).Format(time.RFC3339), "cadence": map[string]any{"type": "days", "day": 0, "every": 3, "anchorDate": dateText(today.AddDate(0, 0, -3))}, "effort": 2, "eligible": []string{"sam", "jordan"}},
 		map[string]any{"id": "floors", "name": "Vacuum main floor", "createdAt": now.Add(-24 * time.Hour).Format(time.RFC3339), "cadence": map[string]any{"type": "weekly", "day": int(today.AddDate(0, 0, 1).Weekday()), "every": 1, "anchorDate": dateText(today.AddDate(0, 0, -6))}, "effort": 3, "eligible": []string{"avery", "sam"}},
+		map[string]any{"id": "lunches", "name": "Prepare lunches", "createdAt": now.Add(-24 * time.Hour).Format(time.RFC3339), "cadence": map[string]any{"type": "weekdays", "day": 0, "every": 1, "anchorDate": dateText(today)}, "effort": 2, "eligible": []string{"avery", "jordan", "sam"}},
+		map[string]any{"id": "plants", "name": "Water plants", "createdAt": now.Add(-24 * time.Hour).Format(time.RFC3339), "cadence": map[string]any{"type": "days", "day": 0, "every": 4, "anchorDate": dateText(today.AddDate(0, 0, -4))}, "effort": 1, "eligible": []string{"jordan", "sam"}},
+		map[string]any{"id": "mail", "name": "Sort mail", "createdAt": now.Add(-24 * time.Hour).Format(time.RFC3339), "cadence": map[string]any{"type": "weekly", "day": int(today.AddDate(0, 0, 3).Weekday()), "every": 1, "anchorDate": dateText(today.AddDate(0, 0, -4))}, "effort": 1, "eligible": []string{"avery", "jordan"}},
 	}, "assignments": []any{
-		map[string]any{"id": "asg-dishes-today", "date": dateText(today), "choreId": "dishes", "choreName": "Dishes", "personId": "avery", "personName": "Avery", "status": "assigned", "source": "showcase"},
-		map[string]any{"id": "asg-recycling-today", "date": dateText(today), "choreId": "recycling", "choreName": "Take out recycling", "personId": "jordan", "personName": "Jordan", "status": "assigned", "source": "showcase"},
-		map[string]any{"id": "asg-litter-tomorrow", "date": dateText(today.AddDate(0, 0, 1)), "choreId": "litter", "choreName": "Refresh litter box", "personId": "sam", "personName": "Sam", "status": "assigned", "source": "showcase"},
-	}, "settings": map[string]any{"horizonDays": 14, "calendarOutputEnabled": true}}
+		showcaseChoreAssignment("asg-dishes-yesterday", today.AddDate(0, 0, -1), "dishes", "Dishes", "jordan", "Jordan", "completed"),
+		showcaseChoreAssignment("asg-dishes-today", today, "dishes", "Dishes", "avery", "Avery", "assigned"),
+		showcaseChoreAssignment("asg-recycling-today", today, "recycling", "Take out recycling", "jordan", "Jordan", "assigned"),
+		showcaseChoreAssignment("asg-litter-tomorrow", today.AddDate(0, 0, 1), "litter", "Refresh litter box", "sam", "Sam", "assigned"),
+		showcaseChoreAssignment("asg-floors-plus2", today.AddDate(0, 0, 2), "floors", "Vacuum main floor", "avery", "Avery", "assigned"),
+		showcaseChoreAssignment("asg-mail-plus3", today.AddDate(0, 0, 3), "mail", "Sort mail", "jordan", "Jordan", "assigned"),
+		showcaseChoreAssignment("asg-plants-plus4", today.AddDate(0, 0, 4), "plants", "Water plants", "sam", "Sam", "assigned"),
+		showcaseChoreAssignment("asg-lunches-plus5", today.AddDate(0, 0, 5), "lunches", "Prepare lunches", "avery", "Avery", "assigned"),
+		showcaseChoreAssignment("asg-dishes-plus6", today.AddDate(0, 0, 6), "dishes", "Dishes", "sam", "Sam", "assigned"),
+		showcaseChoreAssignment("asg-recycling-plus7", today.AddDate(0, 0, 7), "recycling", "Take out recycling", "jordan", "Jordan", "assigned"),
+		showcaseChoreAssignment("asg-litter-plus8", today.AddDate(0, 0, 8), "litter", "Refresh litter box", "sam", "Sam", "assigned"),
+		showcaseChoreAssignment("asg-floors-plus10", today.AddDate(0, 0, 10), "floors", "Vacuum main floor", "avery", "Avery", "assigned"),
+		showcaseChoreAssignment("asg-plants-plus12", today.AddDate(0, 0, 12), "plants", "Water plants", "jordan", "Jordan", "assigned"),
+		showcaseChoreAssignment("asg-lunches-plus14", today.AddDate(0, 0, 14), "lunches", "Prepare lunches", "sam", "Sam", "assigned"),
+	}, "settings": map[string]any{"horizonDays": 21, "calendarOutputEnabled": true}}
 	return writeJSON(filepath.Join(config, "chore-wheel.json"), chores, 0644)
+}
+
+func showcaseChoreAssignment(id string, when time.Time, choreID, choreName, personID, personName, status string) map[string]any {
+	return map[string]any{"id": id, "date": dateText(when), "choreId": choreID, "choreName": choreName, "personId": personID, "personName": personName, "status": status, "source": "showcase"}
 }
 
 func seedRoutines(config string, people []map[string]any, today time.Time, now time.Time) error {
@@ -220,8 +238,10 @@ func seedRoutines(config string, people []map[string]any, today time.Time, now t
 		peopleSnap = append(peopleSnap, map[string]any{"id": p["id"], "name": p["name"]})
 	}
 	routines := map[string]any{"schema": 1, "revision": 1, "settings": map[string]any{"calendarOutputEnabled": true, "calendarHorizonDays": 56, "defaultCalendarEnabled": true}, "people": peopleSnap, "routines": []any{
-		map[string]any{"id": "morning", "title": "Morning ready", "note": "A calm before-school checklist.", "steps": []any{map[string]any{"id": "pack", "text": "Pack bag"}, map[string]any{"id": "breakfast", "text": "Breakfast"}, map[string]any{"id": "teeth", "text": "Brush teeth"}}, "assignments": []any{map[string]any{"id": "morning-avery", "personId": "avery", "personNameSnapshot": "Avery", "calendarEnabled": true, "schedule": map[string]any{"kind": "days", "every": 1, "startOn": dateText(today.AddDate(0, 0, -14)), "endOn": "", "month": 1, "day": 1, "time": "07:15", "allDay": false}}}},
-		map[string]any{"id": "evening", "title": "Evening reset", "note": "Close the day together.", "steps": []any{map[string]any{"id": "counter", "text": "Clear counters"}, map[string]any{"id": "laundry", "text": "Start laundry"}, map[string]any{"id": "calendar", "text": "Check tomorrow"}}, "assignments": []any{map[string]any{"id": "evening-jordan", "personId": "jordan", "personNameSnapshot": "Jordan", "calendarEnabled": true, "schedule": map[string]any{"kind": "days", "every": 1, "startOn": dateText(today.AddDate(0, 0, -14)), "endOn": "", "month": 1, "day": 1, "time": "20:00", "allDay": false}}}},
+		map[string]any{"id": "morning", "title": "Morning ready", "note": "A calm before-school checklist.", "steps": []any{map[string]any{"id": "pack", "text": "Pack bag"}, map[string]any{"id": "breakfast", "text": "Breakfast"}, map[string]any{"id": "teeth", "text": "Brush teeth"}}, "assignments": []any{map[string]any{"id": "morning-avery", "personId": "avery", "personNameSnapshot": "Avery", "calendarEnabled": true, "schedule": map[string]any{"kind": "weekdays", "every": 1, "weekdays": []string{"MO", "TU", "WE", "TH", "FR"}, "startOn": dateText(today.AddDate(0, 0, -14)), "endOn": "", "month": 1, "day": 1, "time": "07:15", "allDay": false}}}},
+		map[string]any{"id": "school-launch", "title": "School launch", "note": "Lunch, library item, and a quick weather check.", "steps": []any{map[string]any{"id": "lunch", "text": "Lunch check"}, map[string]any{"id": "library", "text": "Library item"}, map[string]any{"id": "weather", "text": "Weather layer"}}, "assignments": []any{map[string]any{"id": "launch-sam", "personId": "sam", "personNameSnapshot": "Sam", "calendarEnabled": true, "schedule": map[string]any{"kind": "weekdays", "every": 1, "weekdays": []string{"MO", "TU", "WE", "TH", "FR"}, "startOn": dateText(today.AddDate(0, 0, -14)), "endOn": "", "month": 1, "day": 1, "time": "07:45", "allDay": false}}}},
+		map[string]any{"id": "evening", "title": "Evening reset", "note": "Close the day together.", "steps": []any{map[string]any{"id": "counter", "text": "Clear counters"}, map[string]any{"id": "laundry", "text": "Start laundry"}, map[string]any{"id": "calendar", "text": "Check tomorrow"}}, "assignments": []any{map[string]any{"id": "evening-jordan", "personId": "jordan", "personNameSnapshot": "Jordan", "calendarEnabled": true, "schedule": map[string]any{"kind": "days", "every": 1, "weekdays": []string{}, "startOn": dateText(today.AddDate(0, 0, -14)), "endOn": "", "month": 1, "day": 1, "time": "20:00", "allDay": false}}}},
+		map[string]any{"id": "sunday-reset", "title": "Sunday reset", "note": "Refresh the week without over-scheduling it.", "steps": []any{map[string]any{"id": "calendar", "text": "Review calendar"}, map[string]any{"id": "grocery", "text": "Check grocery list"}, map[string]any{"id": "laundry", "text": "Start one laundry load"}}, "assignments": []any{map[string]any{"id": "reset-family", "personId": "jordan", "personNameSnapshot": "Jordan", "calendarEnabled": true, "schedule": map[string]any{"kind": "weekly", "every": 1, "weekdays": []string{"SU"}, "startOn": dateText(today.AddDate(0, 0, -21)), "endOn": "", "month": 1, "day": 1, "time": "16:30", "allDay": false}}}},
 	}, "occurrences": []any{}, "history": []any{}}
 	return writeJSON(filepath.Join(config, "routines.json"), routines, 0644)
 }
@@ -230,7 +250,9 @@ func seedMaintenance(config string, today time.Time, now time.Time) error {
 	maintenance := map[string]any{"schema": 2, "settings": map[string]any{"defaultCalendarEnabled": true, "calendarOutputEnabled": true, "dueSoonDays": 30}, "tasks": []any{
 		maintenanceTask("replace-filter", "Replace HVAC filter", "Use the MERV 11 filter in the hall closet.", today.AddDate(0, 0, 1), today.AddDate(0, 0, -89), "jordan", "Jordan", now),
 		maintenanceTask("test-detectors", "Test smoke detectors", "Check every bedroom and replace weak batteries.", today, today.AddDate(0, 0, -181), "avery", "Avery", now),
-		maintenanceTask("clean-gutters", "Clean gutters", "Schedule before autumn leaves fall.", today.AddDate(0, 0, 28), today.AddDate(0, 0, -150), "sam", "Sam", now),
+		maintenanceTask("clean-gutters", "Clean gutters", "Schedule before autumn leaves fall.", today.AddDate(0, 0, 16), today.AddDate(0, 0, -150), "sam", "Sam", now),
+		maintenanceTask("water-filter", "Replace water filter", "Use the replacement stored with appliance manuals.", today.AddDate(0, 0, 9), today.AddDate(0, 0, -175), "avery", "Avery", now),
+		maintenanceTask("camera-batteries", "Check door camera batteries", "Confirm the entry camera and mailbox sensor are charged.", today.AddDate(0, 0, 23), today.AddDate(0, 0, -340), "jordan", "Jordan", now),
 	}, "history": []any{}}
 	return writeJSON(filepath.Join(config, "maintenance-tracker.json"), maintenance, 0644)
 }
@@ -340,6 +362,8 @@ type showcaseCalendarFixture struct {
 	File   string
 	Name   string
 	Color  string
+	Owner  string
+	Tag    string
 	Events []showcaseCalendarEvent
 }
 
@@ -360,82 +384,158 @@ func seedCalendars(calendarDir, scenario string, today time.Time, loc *time.Loca
 		if err := writeCalendar(filepath.Join(calendarDir, fixture.File), fixture.Name, today, fixture.Events); err != nil {
 			return err
 		}
-		manifest = append(manifest, map[string]any{
+		entry := map[string]any{
 			"url":     "calendars/" + fixture.File,
 			"name":    fixture.Name,
 			"color":   fixture.Color,
 			"enabled": true,
 			"tag":     "showcase",
-		})
+		}
+		if fixture.Owner != "" {
+			entry["owner"] = fixture.Owner
+		}
+		if fixture.Tag != "" {
+			entry["tag"] = fixture.Tag
+		}
+		manifest = append(manifest, entry)
 	}
 	// The dashboard browser discovers local calendars through this manifest before
 	// it requests their ICS files. Studio packages intentionally exclude mutable
-	// runtime data, so seed the full fixture catalog instead of relying on the
-	// appliance-side calendar job to create it later.
+	// runtime data, so seed both user-managed and Dash-Go-owned feed snapshots.
 	return writeJSON(filepath.Join(calendarDir, "calendars.json"), manifest, 0644)
 }
 
 func showcaseCalendars(scenario string, today time.Time, loc *time.Location, profile LocationProfile) []showcaseCalendarFixture {
 	base := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, loc)
-	fixtures := []showcaseCalendarFixture{
-		{
-			File:  "family.green.ics",
-			Name:  "Family",
-			Color: "#8fc4a6",
-			Events: []showcaseCalendarEvent{
-				allDayShowcaseEvent("family-birthday", "Avery’s birthday", today.AddDate(0, 0, 5)),
-				allDayShowcaseEvent("family-trip", "Family road trip", today.AddDate(0, 0, 12)),
-				timedShowcaseEvent("family-breakfast", "Breakfast together", base.Add(7*time.Hour+30*time.Minute), base.Add(8*time.Hour+15*time.Minute), "Kitchen", "A relaxed start to the day."),
-				timedShowcaseEvent("family-dinner", "Dinner reservation", base.Add(18*time.Hour), base.Add(19*time.Hour+30*time.Minute), profile.City+" dinner spot", "A fictional city-shaped location supports the map preview path."),
-			},
-		},
-		{
-			File:  "school.blue.ics",
-			Name:  "School",
-			Color: "#8bb4d4",
-			Events: []showcaseCalendarEvent{
-				timedShowcaseEvent("school-showcase", "School showcase", base.Add(8*time.Hour+30*time.Minute), base.Add(9*time.Hour+30*time.Minute), profile.Venue, "Bring the blue folder."),
-				timedShowcaseEvent("school-club", "Library club", base.Add(15*time.Hour+30*time.Minute), base.Add(16*time.Hour+30*time.Minute), profile.Venue, "A low-key after-school activity."),
-				allDayShowcaseEvent("school-conference", "Family-teacher conference", today.AddDate(0, 0, 9)),
-			},
-		},
-		{
-			File:  "home.amber.ics",
-			Name:  "Home",
-			Color: "#cda76a",
-			Events: []showcaseCalendarEvent{
-				allDayShowcaseEvent("home-trash", "Trash pickup", today.AddDate(0, 0, 1)),
-				allDayShowcaseEvent("home-filter", "Replace HVAC filter", today.AddDate(0, 0, 2)),
-				timedShowcaseEvent("home-prep", "Meal prep", base.Add(16*time.Hour), base.Add(17*time.Hour), "Kitchen", "Set out ingredients for tomorrow."),
-			},
-		},
-		{
-			File:  "plans.violet.ics",
-			Name:  "Plans",
-			Color: "#9a8fb0",
-			Events: []showcaseCalendarEvent{
-				timedShowcaseEvent("plans-morning", "Morning ready", base.Add(7*time.Hour+15*time.Minute), base.Add(7*time.Hour+30*time.Minute), "Home", "A calm before-school checklist."),
-				timedShowcaseEvent("plans-evening", "Evening reset", base.Add(20*time.Hour), base.Add(20*time.Hour+30*time.Minute), "Home", "Close the day together."),
-				allDayShowcaseEvent("plans-weekend", "Weekend plan", today.AddDate(0, 0, 3)),
-			},
+	monday := weekdayOnOrAfter(base, time.Monday)
+	friday := weekdayOnOrAfter(base, time.Friday)
+	family := showcaseCalendarFixture{
+		File: "family.green.ics", Name: "Family", Color: "#8fc4a6",
+		Events: []showcaseCalendarEvent{
+			timedShowcaseEvent("family-breakfast", "Breakfast together", base.Add(7*time.Hour+30*time.Minute), base.Add(8*time.Hour+15*time.Minute), "Kitchen", "A relaxed start to the day."),
+			timedShowcaseEvent("family-dinner", "Dinner reservation", base.Add(18*time.Hour), base.Add(19*time.Hour+30*time.Minute), profile.City+" dinner spot", "A fictional city-shaped location supports the map preview path."),
+			timedShowcaseEvent("family-picnic", "Park picnic", base.AddDate(0, 0, 2).Add(12*time.Hour), base.AddDate(0, 0, 2).Add(14*time.Hour), "Riverside park", "Bring the blue blanket and the picnic list."),
+			allDayShowcaseEvent("family-birthday", "Avery’s birthday", base.AddDate(0, 0, 5)),
+			timedShowcaseEvent("family-call", "Grandparent video call", base.AddDate(0, 0, 7).Add(18*time.Hour+30*time.Minute), base.AddDate(0, 0, 7).Add(19*time.Hour), "Living room", "A short family check-in."),
+			allDayShowcaseEvent("family-conference", "Family-teacher conference", base.AddDate(0, 0, 9)),
+			multiDayShowcaseEvent("family-trip", "Family road trip", base.AddDate(0, 0, 12), base.AddDate(0, 0, 17)),
+			timedShowcaseEvent("family-return", "Unpack and reset", base.AddDate(0, 0, 17).Add(17*time.Hour), base.AddDate(0, 0, 17).Add(18*time.Hour), "Home", "Return-home checklist after the multi-day trip."),
+			multiDayShowcaseEvent("family-visitors", "Cousins visiting", base.AddDate(0, 0, 24), base.AddDate(0, 0, 27)),
 		},
 	}
+	school := showcaseCalendarFixture{
+		File: "school.blue.ics", Name: "School", Color: "#8bb4d4",
+		Events: []showcaseCalendarEvent{
+			timedShowcaseEvent("school-showcase", "School showcase", base.Add(8*time.Hour+30*time.Minute), base.Add(9*time.Hour+30*time.Minute), profile.Venue, "Bring the blue folder."),
+			timedShowcaseEvent("school-club", "Library club", base.Add(15*time.Hour+30*time.Minute), base.Add(16*time.Hour+30*time.Minute), profile.Venue, "A low-key after-school activity."),
+			allDayShowcaseEvent("school-reading", "Reading challenge starts", base.AddDate(0, 0, 3)),
+			timedShowcaseEvent("school-lab", "Science lab", monday.AddDate(0, 0, 1).Add(15*time.Hour+15*time.Minute), monday.AddDate(0, 0, 1).Add(16*time.Hour+30*time.Minute), profile.Venue, "Bring the completed observation sheet."),
+			timedShowcaseEvent("school-workshop", "Museum workshop", friday.AddDate(0, 0, 7).Add(10*time.Hour), friday.AddDate(0, 0, 7).Add(12*time.Hour), profile.Venue, "A timed event with a location for the map preview."),
+			allDayShowcaseEvent("school-supplies", "Class supply check", base.AddDate(0, 0, 15)),
+			multiDayShowcaseEvent("school-camp", "Summer learning camp", base.AddDate(0, 0, 19), base.AddDate(0, 0, 23)),
+		},
+	}
+	home := showcaseCalendarFixture{
+		File: "home.amber.ics", Name: "Home", Color: "#cda76a",
+		Events: []showcaseCalendarEvent{
+			allDayShowcaseEvent("home-trash", "Trash pickup", base.AddDate(0, 0, 1)),
+			allDayShowcaseEvent("home-recycling", "Recycling pickup", base.AddDate(0, 0, 4)),
+			timedShowcaseEvent("home-prep", "Meal prep", base.Add(16*time.Hour), base.Add(17*time.Hour), "Kitchen", "Set out ingredients for tomorrow."),
+			timedShowcaseEvent("home-grocery", "Grocery pickup", base.AddDate(0, 0, 2).Add(17*time.Hour), base.AddDate(0, 0, 2).Add(17*time.Hour+30*time.Minute), profile.Market, "The local Grocery list has the matching order."),
+			timedShowcaseEvent("home-laundry", "Laundry reset", base.AddDate(0, 0, 6).Add(10*time.Hour), base.AddDate(0, 0, 6).Add(11*time.Hour), "Laundry room", "A small home-maintenance block."),
+			multiDayShowcaseEvent("home-project", "Garage refresh", base.AddDate(0, 0, 14), base.AddDate(0, 0, 16)),
+			timedShowcaseEvent("home-porch", "Porch plants", base.AddDate(0, 0, 20).Add(9*time.Hour), base.AddDate(0, 0, 20).Add(10*time.Hour), "Front porch", "A lightweight home project."),
+		},
+	}
+	plans := showcaseCalendarFixture{
+		File: "plans.violet.ics", Name: "Plans", Color: "#9a8fb0",
+		Events: []showcaseCalendarEvent{
+			allDayShowcaseEvent("plans-weekend", "Weekend plan", base.AddDate(0, 0, 3)),
+			timedShowcaseEvent("plans-coffee", "Coffee with a friend", monday.AddDate(0, 0, 2).Add(8*time.Hour+30*time.Minute), monday.AddDate(0, 0, 2).Add(9*time.Hour+15*time.Minute), "Neighborhood cafe", "A short timed appointment."),
+			timedShowcaseEvent("plans-volunteer", "Volunteer shift", base.AddDate(0, 0, 8).Add(9*time.Hour), base.AddDate(0, 0, 8).Add(11*time.Hour), profile.Venue, "An event card with location and detail."),
+			timedShowcaseEvent("plans-movie", "Movie night", base.AddDate(0, 0, 10).Add(19*time.Hour), base.AddDate(0, 0, 10).Add(21*time.Hour), "Home", "A calm evening plan."),
+			timedShowcaseEvent("plans-dentist", "Dentist appointment", base.AddDate(0, 0, 18).Add(14*time.Hour), base.AddDate(0, 0, 18).Add(15*time.Hour), "Downtown dental office", "A compact appointment that exercises map content."),
+			timedShowcaseEvent("plans-date", "Date night", base.AddDate(0, 0, 21).Add(18*time.Hour+30*time.Minute), base.AddDate(0, 0, 21).Add(20*time.Hour+30*time.Minute), profile.City+" arts district", "A second evening plan for calendar variety."),
+		},
+	}
+	chores := showcaseCalendarFixture{
+		File: "chore-wheel.ics", Name: "Chores", Color: "#7fc4c4", Owner: "chore-wheel",
+		Events: []showcaseCalendarEvent{
+			allDayShowcaseEvent("chore-dishes-today", "Dishes — Avery", base),
+			allDayShowcaseEvent("chore-recycling-today", "Take out recycling — Jordan", base),
+			allDayShowcaseEvent("chore-litter-plus1", "Refresh litter box — Sam", base.AddDate(0, 0, 1)),
+			allDayShowcaseEvent("chore-floors-plus2", "Vacuum main floor — Avery", base.AddDate(0, 0, 2)),
+			allDayShowcaseEvent("chore-mail-plus3", "Sort mail — Jordan", base.AddDate(0, 0, 3)),
+			allDayShowcaseEvent("chore-plants-plus4", "Water plants — Sam", base.AddDate(0, 0, 4)),
+			allDayShowcaseEvent("chore-lunches-plus5", "Prepare lunches — Avery", base.AddDate(0, 0, 5)),
+			allDayShowcaseEvent("chore-dishes-plus6", "Dishes — Sam", base.AddDate(0, 0, 6)),
+			allDayShowcaseEvent("chore-recycling-plus7", "Take out recycling — Jordan", base.AddDate(0, 0, 7)),
+			allDayShowcaseEvent("chore-litter-plus8", "Refresh litter box — Sam", base.AddDate(0, 0, 8)),
+			allDayShowcaseEvent("chore-floors-plus10", "Vacuum main floor — Avery", base.AddDate(0, 0, 10)),
+			allDayShowcaseEvent("chore-plants-plus12", "Water plants — Jordan", base.AddDate(0, 0, 12)),
+			allDayShowcaseEvent("chore-lunches-plus14", "Prepare lunches — Sam", base.AddDate(0, 0, 14)),
+		},
+	}
+	routines := showcaseCalendarFixture{
+		File: "routines.ics", Name: "Routines", Color: "#a999d4", Owner: "routines",
+		Events: showcaseRoutineCalendarEvents(base),
+	}
+	maintenance := showcaseCalendarFixture{
+		File: "maintenance.ics", Name: "Maintenance", Color: "#d9c074", Owner: "maintenance",
+		Events: []showcaseCalendarEvent{
+			allDayShowcaseEvent("maintenance-detectors", "Test smoke detectors", base),
+			allDayShowcaseEvent("maintenance-filter", "Replace HVAC filter", base.AddDate(0, 0, 1)),
+			allDayShowcaseEvent("maintenance-water", "Replace water filter", base.AddDate(0, 0, 9)),
+			allDayShowcaseEvent("maintenance-gutters", "Clean gutters", base.AddDate(0, 0, 16)),
+			allDayShowcaseEvent("maintenance-camera", "Check door camera batteries", base.AddDate(0, 0, 23)),
+		},
+	}
+	fixtures := []showcaseCalendarFixture{family, school, home, plans, chores, routines, maintenance}
 	if scenario == "busy-calendar" || scenario == "capture-gallery" {
-		plans := &fixtures[3]
 		for i := 0; i < 7; i++ {
-			start := base.Add(time.Duration(9+i) * time.Hour)
+			start := base.AddDate(0, 0, 4).Add(time.Duration(9+i) * time.Hour)
 			plans.Events = append(plans.Events, timedShowcaseEvent(fmt.Sprintf("plans-busy-%d", i), fmt.Sprintf("Planning block %d", i+1), start, start.Add(75*time.Minute), profile.City+" planning room", "Dense calendar fixture."))
 		}
+		fixtures[3] = plans
 	}
 	if scenario == "family-flow" {
-		family := &fixtures[0]
-		family.Events = append(family.Events, timedShowcaseEvent("family-meeting", "Family meeting", base.Add(19*time.Hour+45*time.Minute), base.Add(20*time.Hour+20*time.Minute), profile.Venue, "Review chores, routines, and weekend plans."))
+		family.Events = append(family.Events, timedShowcaseEvent("family-meeting", "Family meeting", base.AddDate(0, 0, 6).Add(19*time.Hour+45*time.Minute), base.AddDate(0, 0, 6).Add(20*time.Hour+20*time.Minute), profile.Venue, "Review chores, routines, and weekend plans."))
+		fixtures[0] = family
 	}
 	return fixtures
 }
 
+func showcaseRoutineCalendarEvents(base time.Time) []showcaseCalendarEvent {
+	events := []showcaseCalendarEvent{}
+	for day := base.AddDate(0, 0, -1); !day.After(base.AddDate(0, 0, 24)); day = day.AddDate(0, 0, 1) {
+		if day.Weekday() == time.Saturday || day.Weekday() == time.Sunday {
+			events = append(events, timedShowcaseEvent("routine-weekend-"+icsDate(day), "Weekend reset — Jordan", day.Add(16*time.Hour+30*time.Minute), day.Add(17*time.Hour), "Home", "Review the calendar and grocery list."))
+			continue
+		}
+		events = append(events,
+			timedShowcaseEvent("routine-morning-"+icsDate(day), "Morning ready — Avery", day.Add(7*time.Hour+15*time.Minute), day.Add(7*time.Hour+30*time.Minute), "Home", "A weekday Routines session."),
+			timedShowcaseEvent("routine-evening-"+icsDate(day), "Evening reset — Jordan", day.Add(20*time.Hour), day.Add(20*time.Hour+15*time.Minute), "Home", "Close the day together."),
+		)
+		if day.Weekday() == time.Monday || day.Weekday() == time.Wednesday || day.Weekday() == time.Friday {
+			events = append(events, timedShowcaseEvent("routine-launch-"+icsDate(day), "School launch — Sam", day.Add(7*time.Hour+45*time.Minute), day.Add(8*time.Hour), "Home", "Lunch, library item, and weather check."))
+		}
+	}
+	return events
+}
+
+func weekdayOnOrAfter(start time.Time, wanted time.Weekday) time.Time {
+	for start.Weekday() != wanted {
+		start = start.AddDate(0, 0, 1)
+	}
+	return start
+}
+
 func allDayShowcaseEvent(uid, title string, start time.Time) showcaseCalendarEvent {
-	return showcaseCalendarEvent{UID: uid, Title: title, Start: start, AllDay: true}
+	return showcaseCalendarEvent{UID: uid, Title: title, Start: start, End: start.AddDate(0, 0, 1), AllDay: true}
+}
+
+func multiDayShowcaseEvent(uid, title string, start, endExclusive time.Time) showcaseCalendarEvent {
+	return showcaseCalendarEvent{UID: uid, Title: title, Start: start, End: endExclusive, AllDay: true}
 }
 
 func timedShowcaseEvent(uid, title string, start, end time.Time, location, description string) showcaseCalendarEvent {
@@ -447,7 +547,11 @@ func writeCalendar(path, calendarName string, today time.Time, events []showcase
 	for _, event := range events {
 		lines = append(lines, "BEGIN:VEVENT", "UID:"+event.UID, "DTSTAMP:"+icsStamp(today))
 		if event.AllDay {
-			lines = append(lines, "DTSTART;VALUE=DATE:"+icsDate(event.Start))
+			end := event.End
+			if end.IsZero() || !end.After(event.Start) {
+				end = event.Start.AddDate(0, 0, 1)
+			}
+			lines = append(lines, "DTSTART;VALUE=DATE:"+icsDate(event.Start), "DTEND;VALUE=DATE:"+icsDate(end))
 		} else {
 			lines = append(lines, "DTSTART:"+icsStamp(event.Start), "DTEND:"+icsStamp(event.End))
 		}

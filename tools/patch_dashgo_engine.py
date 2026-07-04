@@ -427,7 +427,7 @@ func (a *app) showcaseStaticDataPath(rel string) (string, bool) {
 	}
 	switch rel {
 	case "config/config.local.js", "config/compliments.json", "config/message-cache.json", "config/temp-messages.json", "config/scheduled-messages.json", "config/settings.json",
-		"calendars/calendars.json", "calendars/family.green.ics", "calendars/school.blue.ics", "calendars/home.amber.ics", "calendars/plans.violet.ics", "cache/events.cache.json":
+		"calendars/calendars.json", "calendars/family.green.ics", "calendars/school.blue.ics", "calendars/home.amber.ics", "calendars/plans.violet.ics", "calendars/chore-wheel.ics", "calendars/routines.ics", "calendars/maintenance.ics", "cache/events.cache.json":
 		return filepath.Join(dashGoShowcaseDataRoot(a.dash), filepath.FromSlash(rel)), true
 	default:
 		return "", false
@@ -651,6 +651,9 @@ func TestShowcaseStaticDataPathAllowsEverySeededCalendar(t *testing.T) {
 		"calendars/school.blue.ics",
 		"calendars/home.amber.ics",
 		"calendars/plans.violet.ics",
+		"calendars/chore-wheel.ics",
+		"calendars/routines.ics",
+		"calendars/maintenance.ics",
 	} {
 		got, ok := a.showcaseStaticDataPath(rel)
 		want := filepath.Join(root, filepath.FromSlash(rel))

@@ -206,8 +206,11 @@ var requiredClientVisibleScenarioData = []clientVisibleScenarioData{
 	{Path: "/calendars/calendars.json", Contains: "calendars/plans.violet.ics", ParseJSON: true},
 	{Path: "/calendars/family.green.ics", Contains: "SUMMARY:Breakfast together"},
 	{Path: "/calendars/school.blue.ics", Contains: "SUMMARY:School showcase"},
-	{Path: "/calendars/home.amber.ics", Contains: "SUMMARY:Meal prep"},
-	{Path: "/calendars/plans.violet.ics", Contains: "SUMMARY:Morning ready"},
+	{Path: "/calendars/home.amber.ics", Contains: "SUMMARY:Garage refresh"},
+	{Path: "/calendars/plans.violet.ics", Contains: "SUMMARY:Volunteer shift"},
+	{Path: "/calendars/chore-wheel.ics", Contains: "SUMMARY:Dishes — Avery"},
+	{Path: "/calendars/routines.ics", Contains: "SUMMARY:Morning ready — Avery"},
+	{Path: "/calendars/maintenance.ics", Contains: "SUMMARY:Test smoke detectors"},
 	{Path: "/api/weather", Contains: "showcase-fixture", ParseJSON: true},
 }
 

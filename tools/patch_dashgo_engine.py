@@ -11,6 +11,8 @@ sys.dont_write_bytecode = True
 
 import argparse
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 
@@ -36,6 +38,20 @@ def remove_import(path: Path, literal: str) -> None:
 def write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content.lstrip(), encoding="utf-8")
+    if path.suffix != ".go":
+        return
+    gofmt = shutil.which("gofmt")
+    if not gofmt:
+        raise PatchError("gofmt is required to format generated Showcase Go sources")
+    result = subprocess.run(
+        [gofmt, "-w", str(path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise PatchError(f"{path}: gofmt failed{': ' + detail if detail else ''}")
 
 
 def append_once(path: Path, marker: str, addition: str) -> None:

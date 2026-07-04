@@ -62,6 +62,7 @@ WINDOWS_AS_INVOKER_MANIFEST = """<?xml version=\"1.0\" encoding=\"UTF-8\" standa
 
 SHOWCASE_OVERLAY_GO_FILES = (
     "cmd/dashboard-control-server/showcase_mode.go",
+    "cmd/dashboard-control-server/showcase_calendar_sandbox.go",
     "cmd/dashboard-control-server/portable_runtime_unix.go",
     "cmd/dashboard-control-server/portable_runtime_windows.go",
     "internal/platform/disk_free_unix.go",

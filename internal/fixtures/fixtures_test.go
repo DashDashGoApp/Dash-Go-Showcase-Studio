@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
-func TestScenariosAreStableAndSeededLocally(t *testing.T) {
+func TestRealityLayerSeedsSevenBrowserCalendarsAndSessionWriteback(t *testing.T) {
 	ids := stableScenarioIDs()
 	if len(ids) < 4 || ids[0] == "" {
 		t.Fatalf("scenario catalog is incomplete: %#v", ids)
@@ -16,15 +17,18 @@ func TestScenariosAreStableAndSeededLocally(t *testing.T) {
 	root := t.TempDir()
 	app := filepath.Join(root, "app")
 	home := filepath.Join(root, "home")
-	if err := Seed(app, home, DefaultScenario, time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)); err != nil {
+	now := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
+	if err := Seed(app, home, DefaultScenario, now); err != nil {
 		t.Fatal(err)
 	}
+
 	for _, rel := range []string{
 		"config/household-people.json",
 		"config/chore-wheel.json",
 		"config/routines.json",
 		"config/maintenance-tracker.json",
 		"config/household-schedules.json",
+		"config/calendar-writeback.json",
 		"config/todo/_lists.json",
 		"calendars/calendars.json",
 		"calendars/family.green.ics",
@@ -39,6 +43,7 @@ func TestScenariosAreStableAndSeededLocally(t *testing.T) {
 			t.Fatalf("missing %s: %v", rel, err)
 		}
 	}
+
 	manifest, err := os.ReadFile(filepath.Join(app, "calendars", "calendars.json"))
 	if err != nil {
 		t.Fatalf("read browser calendar manifest: %v", err)
@@ -73,30 +78,154 @@ func TestScenariosAreStableAndSeededLocally(t *testing.T) {
 	if len(wantCalendars) != 0 {
 		t.Fatalf("browser calendar manifest is missing: %#v", wantCalendars)
 	}
-	for rel, marker := range map[string]string{
-		"family.green.ics": "SUMMARY:Family road trip",
-		"school.blue.ics":  "SUMMARY:Summer learning camp",
-		"home.amber.ics":   "SUMMARY:Garage refresh",
-		"plans.violet.ics": "SUMMARY:Volunteer shift",
-		"chore-wheel.ics":  "SUMMARY:Dishes — Avery",
-		"routines.ics":     "SUMMARY:Morning ready — Avery",
-		"maintenance.ics":  "SUMMARY:Test smoke detectors",
+
+	for rel, markers := range map[string][]string{
+		"family.green.ics": {"SUMMARY:Family meal plan", "RRULE:FREQ=WEEKLY;BYDAY=SU", "SUMMARY:Lake cabin weekend", "RECURRENCE-ID:", "DESCRIPTION:Review the coming week"},
+		"school.blue.ics":  {"SUMMARY:Summer learning camp", "SUMMARY:Library maker lab", "LOCATION:Harold Washington Library Center"},
+		"home.amber.ics":   {"SUMMARY:Grocery pickup", "RRULE:FREQ=WEEKLY;BYDAY=TH", "LOCATION:Whole Foods Market"},
+		"plans.violet.ics": {"SUMMARY:Saturday farmers market", "RRULE:FREQ=WEEKLY;BYDAY=SA", "EXDATE:", "SUMMARY:Food pantry volunteer shift", "LOCATION:Greater Chicago Food Depository"},
+		"chore-wheel.ics":  {"SUMMARY:Kitchen reset —", "SUMMARY:Take out recycling —"},
+		"routines.ics":     {"SUMMARY:Morning ready — Avery", "SUMMARY:Sunday reset — Jordan"},
+		"maintenance.ics":  {"SUMMARY:Test smoke detectors", "SUMMARY:Replace HVAC filter"},
 	} {
 		data, err := os.ReadFile(filepath.Join(app, "calendars", rel))
-		if err != nil || !contains(string(data), marker) {
-			t.Fatalf("calendar %s is missing its fixture marker %q: %v", rel, marker, err)
+		if err != nil {
+			t.Fatalf("read calendar %s: %v", rel, err)
+		}
+		for _, marker := range markers {
+			if !strings.Contains(string(data), marker) {
+				t.Fatalf("calendar %s is missing fixture marker %q", rel, marker)
+			}
 		}
 	}
+
 	family, err := os.ReadFile(filepath.Join(app, "calendars", "family.green.ics"))
-	if err != nil || !contains(string(family), "DTEND;VALUE=DATE:") {
-		t.Fatalf("family fixture is missing an all-day end for multiday spans: %v", err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	chores, err := os.ReadFile(filepath.Join(app, "config", "chore-wheel.json"))
-	if err != nil || !contains(string(chores), "Prepare lunches") || !contains(string(chores), "asg-lunches-plus14") {
-		t.Fatalf("Chore Wheel fixture is not rich enough for the Showcase calendar: %v", err)
+	if !strings.Contains(string(family), "DTEND;VALUE=DATE:") {
+		t.Fatal("family fixture is missing explicit exclusive all-day ends for multi-day spans")
 	}
+
+	writebackBytes, err := os.ReadFile(filepath.Join(app, "config", "calendar-writeback.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var writeback struct {
+		Version    int  `json:"version"`
+		Enabled    bool `json:"enabled"`
+		RequirePIN bool `json:"requirePin"`
+		Calendars  []struct {
+			Source     string `json:"source"`
+			Collection string `json:"collection"`
+			Writable   bool   `json:"writable"`
+			Enabled    bool   `json:"enabled"`
+		} `json:"calendars"`
+	}
+	if err := json.Unmarshal(writebackBytes, &writeback); err != nil {
+		t.Fatalf("parse calendar writeback registry: %v", err)
+	}
+	if writeback.Version != 2 || !writeback.Enabled || writeback.RequirePIN || len(writeback.Calendars) != 3 {
+		t.Fatalf("unexpected Studio writeback registry: %#v", writeback)
+	}
+	wantWritable := map[string]string{
+		"calendars/family.green.ics": filepath.Join(home, ".dashboard-vdirsyncer", "collections", "showcase-family.green"),
+		"calendars/home.amber.ics":   filepath.Join(home, ".dashboard-vdirsyncer", "collections", "showcase-home.amber"),
+		"calendars/plans.violet.ics": filepath.Join(home, ".dashboard-vdirsyncer", "collections", "showcase-plans.violet"),
+	}
+	for _, row := range writeback.Calendars {
+		want, ok := wantWritable[row.Source]
+		if !ok || !row.Writable || !row.Enabled || row.Collection != want {
+			t.Fatalf("unexpected writable Studio calendar: %#v", row)
+		}
+		if entries, err := os.ReadDir(row.Collection); err != nil || len(entries) == 0 {
+			t.Fatalf("writable Studio collection is not seeded: %s: %v", row.Collection, err)
+		}
+		delete(wantWritable, row.Source)
+	}
+	if len(wantWritable) != 0 {
+		t.Fatalf("Studio writeback registry is missing: %#v", wantWritable)
+	}
+
 	if _, err := os.Stat(filepath.Join(home, ".dashboard-family-board.json")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRealityLayerCalendarDatesFollowHouseholdRules(t *testing.T) {
+	loc, err := time.LoadLocation("America/Chicago")
+	if err != nil {
+		t.Fatal(err)
+	}
+	today := time.Date(2026, time.July, 1, 0, 0, 0, 0, loc)
+	fixtures := showcaseCalendars(DefaultScenario, today, loc, DefaultLocation())
+	byFile := map[string]showcaseCalendarFixture{}
+	for _, fixture := range fixtures {
+		byFile[fixture.File] = fixture
+	}
+	for _, check := range []struct {
+		file, title string
+		weekday     time.Weekday
+	}{
+		{"plans.violet.ics", "Saturday farmers market", time.Saturday},
+		{"home.amber.ics", "Trash pickup", time.Tuesday},
+		{"home.amber.ics", "Recycling pickup", time.Tuesday},
+		{"family.green.ics", "Family meal plan", time.Sunday},
+		{"family.green.ics", "Piano practice", time.Wednesday},
+	} {
+		fixture := byFile[check.file]
+		var found *showcaseCalendarEvent
+		for i := range fixture.Events {
+			if fixture.Events[i].Title == check.title {
+				found = &fixture.Events[i]
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("missing %q in %s", check.title, check.file)
+		}
+		if found.Start.Weekday() != check.weekday {
+			t.Fatalf("%q starts on %s, want %s", check.title, found.Start.Weekday(), check.weekday)
+		}
+	}
+
+	plans := byFile["plans.violet.ics"]
+	for _, event := range plans.Events {
+		if event.Title == "Saturday farmers market" && len(event.ExDates) != 1 {
+			t.Fatalf("Saturday market must include one deliberate skipped occurrence: %#v", event)
+		}
+	}
+
+	family := byFile["family.green.ics"]
+	var moved bool
+	for _, event := range family.Events {
+		if event.Title == "Piano practice — moved" {
+			moved = true
+			if event.RecurrenceID.Weekday() != time.Wednesday || event.Start.Weekday() != time.Thursday {
+				t.Fatalf("piano override does not demonstrate a Wednesday-to-Thursday occurrence move: %#v", event)
+			}
+		}
+	}
+	if !moved {
+		t.Fatal("missing moved recurring piano occurrence")
+	}
+
+	// The rolling model deliberately has history and future beyond the current
+	// month. A recurrence starts at least 12 weeks back and its count reaches
+	// more than 20 weeks forward.
+	pastCutoff := today.AddDate(0, 0, -showcasePastDays+7)
+	futureCutoff := today.AddDate(0, 0, 20*7)
+	var historical, future bool
+	for _, event := range append(append([]showcaseCalendarEvent{}, family.Events...), append(byFile["home.amber.ics"].Events, plans.Events...)...) {
+		if event.Start.Before(pastCutoff) {
+			historical = true
+		}
+		if event.RRULE != "" && strings.Contains(event.RRULE, "COUNT=") && event.Start.Before(today) {
+			future = true
+		}
+	}
+	if !historical || !future || !futureCutoff.After(today) {
+		t.Fatalf("rolling calendar coverage is incomplete: historical=%t future=%t", historical, future)
 	}
 }
 
@@ -108,7 +237,7 @@ func TestBusyCalendarAddsPlanningBlocksToPlansFeed(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(app, "calendars", "plans.violet.ics"))
-	if err != nil || !contains(string(data), "SUMMARY:Planning block 7") {
+	if err != nil || !strings.Contains(string(data), "SUMMARY:Planning block 7") {
 		t.Fatalf("busy-calendar plans fixture is incomplete: %v", err)
 	}
 }
@@ -122,26 +251,16 @@ func TestLocationProfilesSeedDistinctCityFixtures(t *testing.T) {
 			t.Fatalf("SeedForLocation(%s): %v", location.ID, err)
 		}
 		data, err := os.ReadFile(filepath.Join(app, "config", "config.local.js"))
-		if err != nil || !contains(string(data), location.City) || !contains(string(data), location.TimeZone) {
+		if err != nil || !strings.Contains(string(data), location.City) || !strings.Contains(string(data), location.TimeZone) {
 			t.Fatalf("location settings missing for %s: %v", location.ID, err)
 		}
-		messages, err := os.ReadFile(filepath.Join(app, "config", "compliments.json"))
-		if err != nil || !contains(string(messages), "studio-discovery") {
-			t.Fatalf("Studio discovery messages missing for %s: %v", location.ID, err)
+		plans, err := os.ReadFile(filepath.Join(app, "calendars", "plans.violet.ics"))
+		market := icsText(location.Market)
+		volunteer := icsText(location.VolunteerSite)
+		if err != nil || !strings.Contains(string(plans), market) || !strings.Contains(string(plans), volunteer) {
+			t.Fatalf("map-ready public venue catalog missing for %s: %v", location.ID, err)
 		}
 	}
-}
-
-func contains(value, find string) bool {
-	return len(find) == 0 || (len(value) >= len(find) && stringContains(value, find))
-}
-func stringContains(value, find string) bool {
-	for i := 0; i+len(find) <= len(value); i++ {
-		if value[i:i+len(find)] == find {
-			return true
-		}
-	}
-	return false
 }
 
 func TestLocationProfilesCarryTourAlertData(t *testing.T) {

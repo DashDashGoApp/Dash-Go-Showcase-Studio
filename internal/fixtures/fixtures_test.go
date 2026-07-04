@@ -22,6 +22,8 @@ func TestScenariosAreStableAndSeededLocally(t *testing.T) {
 	for _, rel := range []string{
 		"config/household-people.json",
 		"config/chore-wheel.json",
+		"config/routines.json",
+		"config/maintenance-tracker.json",
 		"config/household-schedules.json",
 		"config/todo/_lists.json",
 		"calendars/calendars.json",
@@ -29,6 +31,9 @@ func TestScenariosAreStableAndSeededLocally(t *testing.T) {
 		"calendars/school.blue.ics",
 		"calendars/home.amber.ics",
 		"calendars/plans.violet.ics",
+		"calendars/chore-wheel.ics",
+		"calendars/routines.ics",
+		"calendars/maintenance.ics",
 	} {
 		if _, err := os.Stat(filepath.Join(app, rel)); err != nil {
 			t.Fatalf("missing %s: %v", rel, err)
@@ -47,6 +52,9 @@ func TestScenariosAreStableAndSeededLocally(t *testing.T) {
 		"calendars/school.blue.ics":  "School",
 		"calendars/home.amber.ics":   "Home",
 		"calendars/plans.violet.ics": "Plans",
+		"calendars/chore-wheel.ics":  "Chores",
+		"calendars/routines.ics":     "Routines",
+		"calendars/maintenance.ics":  "Maintenance",
 	}
 	if len(calendars) != len(wantCalendars) {
 		t.Fatalf("calendar manifest entries = %d, want %d: %s", len(calendars), len(wantCalendars), manifest)
@@ -66,15 +74,26 @@ func TestScenariosAreStableAndSeededLocally(t *testing.T) {
 		t.Fatalf("browser calendar manifest is missing: %#v", wantCalendars)
 	}
 	for rel, marker := range map[string]string{
-		"family.green.ics": "SUMMARY:Breakfast together",
-		"school.blue.ics":  "SUMMARY:School showcase",
-		"home.amber.ics":   "SUMMARY:Meal prep",
-		"plans.violet.ics": "SUMMARY:Morning ready",
+		"family.green.ics": "SUMMARY:Family road trip",
+		"school.blue.ics":  "SUMMARY:Summer learning camp",
+		"home.amber.ics":   "SUMMARY:Garage refresh",
+		"plans.violet.ics": "SUMMARY:Volunteer shift",
+		"chore-wheel.ics":  "SUMMARY:Dishes — Avery",
+		"routines.ics":     "SUMMARY:Morning ready — Avery",
+		"maintenance.ics":  "SUMMARY:Test smoke detectors",
 	} {
 		data, err := os.ReadFile(filepath.Join(app, "calendars", rel))
 		if err != nil || !contains(string(data), marker) {
 			t.Fatalf("calendar %s is missing its fixture marker %q: %v", rel, marker, err)
 		}
+	}
+	family, err := os.ReadFile(filepath.Join(app, "calendars", "family.green.ics"))
+	if err != nil || !contains(string(family), "DTEND;VALUE=DATE:") {
+		t.Fatalf("family fixture is missing an all-day end for multiday spans: %v", err)
+	}
+	chores, err := os.ReadFile(filepath.Join(app, "config", "chore-wheel.json"))
+	if err != nil || !contains(string(chores), "Prepare lunches") || !contains(string(chores), "asg-lunches-plus14") {
+		t.Fatalf("Chore Wheel fixture is not rich enough for the Showcase calendar: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".dashboard-family-board.json")); err != nil {
 		t.Fatal(err)

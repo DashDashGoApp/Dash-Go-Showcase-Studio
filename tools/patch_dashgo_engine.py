@@ -38,6 +38,14 @@ def write(path: Path, content: str) -> None:
     path.write_text(content.lstrip(), encoding="utf-8")
 
 
+def append_once(path: Path, marker: str, addition: str) -> None:
+    source = path.read_text(encoding="utf-8")
+    count = source.count(marker)
+    if count != 1:
+        raise PatchError(f"{path}: expected exactly one append anchor, found {count}")
+    path.write_text(source.replace(marker, marker + addition, 1), encoding="utf-8")
+
+
 def apply(app: Path) -> None:
     cmd = app / "cmd/dashboard-control-server"
     platform = app / "internal/platform"
@@ -1072,6 +1080,9 @@ func prepareDetachedTerminalCommand(cmd *exec.Cmd) {}
     install_showcase_studio_overlay(app)
 
 def install_showcase_studio_overlay(app: Path) -> None:
+    cmd = app / "cmd/dashboard-control-server"
+    public_post = cmd / "http_routes_public_post.go"
+    calendar_writeback_js = app / "ui/js/calendar-writeback.js"
     # Dash-Go freezes reviewed bundle ordering in a Go test. Studio adds only
     # staged assets and updates that semantic oracle exactly rather than
     # weakening the baseline test.
@@ -1287,10 +1298,465 @@ def install_showcase_studio_overlay(app: Path) -> None:
     write(css, r'''html.showcase-clean-view #showcase-tour{display:none}#showcase-tour{position:fixed;right:22px;bottom:22px;z-index:2147483000;width:min(470px,calc(100vw - 44px));padding:22px;border:1px solid #6eb7e8;border-radius:18px;background:#132434;color:#f6fbff;box-shadow:0 18px 55px #000a;font:17px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}#showcase-tour h2{margin:.4rem 0;font-size:1.35rem;line-height:1.25;letter-spacing:-.01em}#showcase-tour p{margin:.4rem 0 1.1rem;color:#e6f1fa}.showcase-kicker{margin:0;color:#a6d6ff;font-size:.78rem;font-weight:800;letter-spacing:.14em}.showcase-actions{display:flex;gap:10px;flex-wrap:wrap}.showcase-actions button,.showcase-dismiss,#showcase-view button,#showcase-view-restore{border:0;border-radius:10px;padding:10px 14px;background:#eaf5fd;color:#102333;font:inherit;font-weight:750;cursor:pointer}.showcase-actions button[data-next]{background:#58b4f5;color:#082033;font-weight:800}.showcase-actions button[data-restart],.showcase-actions button[data-skip]{background:#1d3347;color:#d3e5f3}.showcase-actions button:focus-visible,.showcase-dismiss:focus-visible{outline:3px solid #a6d6ff;outline-offset:2px}.showcase-actions button:disabled{opacity:.5;cursor:default}.showcase-dismiss{position:absolute;right:10px;top:10px;padding:2px 8px;font-size:1.35rem}.showcase-lock-card{width:min(520px,calc(100vw - 36px));padding:26px;border-radius:18px;background:#132434;color:#f6fbff;box-shadow:0 18px 55px #000a;font:16px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}#showcase-location-lock{position:fixed;inset:0;z-index:2147483001;display:grid;place-items:center;padding:18px;background:#0009}#showcase-location-lock h2{margin:.4rem 0}#showcase-view{position:fixed;left:12px;top:12px;z-index:2147482999;font:14px/1.3 system-ui,-apple-system,"Segoe UI",sans-serif}.showcase-view-toggle{background:#132434!important;color:#f6fbff!important;box-shadow:0 8px 26px #0008}.showcase-view-panel{margin-top:7px;width:min(360px,calc(100vw - 24px));padding:14px;border:1px solid #6eb7e8;border-radius:14px;background:#132434;color:#f6fbff;box-shadow:0 18px 55px #000a}.showcase-view-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.showcase-view-head button{padding:6px 9px}.showcase-view-group>p{margin:14px 0 6px;color:#9ed6ff;font-size:.72rem;font-weight:800;letter-spacing:.09em;text-transform:uppercase}.showcase-view-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.showcase-view-grid button{min-height:54px;text-align:left}.showcase-view-grid b,.showcase-view-grid small{display:block}.showcase-view-grid small{opacity:.7;margin-top:2px}.showcase-view-status{margin:12px 0 0;color:#c9d9e7;font-size:.82rem}#showcase-view-restore{position:fixed;left:0;top:14px;z-index:2147482999;border-radius:0 10px 10px 0;background:#132434;color:#f6fbff;box-shadow:0 8px 26px #0008}@media (max-width:720px),(max-aspect-ratio:3/4){#showcase-tour{left:10px;right:10px;bottom:10px;width:auto;max-height:48vh;overflow:auto;padding:16px;font-size:15px}#showcase-view{left:8px;top:8px}.showcase-view-panel{width:min(320px,calc(100vw - 16px))}.showcase-view-grid{grid-template-columns:1fr}.showcase-actions button{padding:8px 10px}}
 ''')
 
+    # r6: the original r5 overlay seeded writable session calendars but the
+    # stage-to-live path rebase is handled by Studio itself. These additions
+    # complete the actual Studio interaction surface: local-only move and
+    # series delete operations, truthful Calendar Manager labels, and larger
+    # presentation controls.
+    replace_once(
+        asset_order_test,
+        "\t\t\t\"ui/js/showcase-view.js\",\n",
+        "\t\t\t\"ui/js/showcase-view.js\",\n\t\t\t\"ui/js/showcase-calendar-sandbox.js\",\n",
+    )
+    write(cmd / "showcase_calendar_sandbox.go", r'''
+package main
+
+import (
+    "errors"
+    "fmt"
+    "os"
+    "path/filepath"
+    "strings"
+
+    "github.com/DashDashGoApp/Dash-Go/app/internal/calendar/icalwrite"
+    writebackpkg "github.com/DashDashGoApp/Dash-Go/app/internal/calendar/writeback"
+    "github.com/DashDashGoApp/Dash-Go/app/internal/fileio"
+    "github.com/DashDashGoApp/Dash-Go/app/internal/jsonutil"
+)
+
+const showcaseSessionCalendarMessage = "Saved in this Studio session. Changes reset when Studio closes."
+
+func showcaseCalendarUIDValid(uid string) bool {
+    uid = strings.TrimSpace(uid)
+    if uid == "" || len(uid) > 180 {
+        return false
+    }
+    for _, r := range uid {
+        if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || strings.ContainsRune("-_.@", r) {
+            continue
+        }
+        return false
+    }
+    return true
+}
+
+// showcaseFindCalendarItem reads only direct regular vdir object files. The
+// UID check is strict, preventing a crafted request from moving/deleting an
+// aggregate or another collection's event.
+func showcaseFindCalendarItem(collection, uid string) (string, []byte, error) {
+    entries, err := os.ReadDir(collection)
+    if err != nil {
+        return "", nil, err
+    }
+    var foundPath string
+    var foundBody []byte
+    for _, entry := range entries {
+        if entry.IsDir() || strings.ToLower(filepath.Ext(entry.Name())) != ".ics" {
+            continue
+        }
+        info, err := entry.Info()
+        if err != nil {
+            return "", nil, err
+        }
+        if !info.Mode().IsRegular() {
+            continue
+        }
+        if info.Size() > 1024*1024 {
+            return "", nil, fmt.Errorf("calendar item %q is unexpectedly large", entry.Name())
+        }
+        path := filepath.Join(collection, entry.Name())
+        body, err := os.ReadFile(path)
+        if err != nil {
+            return "", nil, err
+        }
+        if !icalwrite.HasUID(string(body), uid) {
+            continue
+        }
+        if foundPath != "" {
+            return "", nil, errors.New("calendar contains more than one item for this event")
+        }
+        foundPath, foundBody = path, body
+    }
+    if foundPath == "" {
+        return "", nil, os.ErrNotExist
+    }
+    return foundPath, foundBody, nil
+}
+
+func (a *app) showcaseCalendarMutationResponse(service *writebackpkg.Service, sources []string, uid, action, label string, mutate func() error) (map[string]any, error) {
+    warning := ""
+    err := service.WithSyncLock(func() error {
+        if err := mutate(); err != nil {
+            return err
+        }
+        for _, source := range sources {
+            calendar, err := service.Resolve(source)
+            if err != nil {
+                return err
+            }
+            if err := service.MergeCollection(source, calendar.Collection); err != nil {
+                warning = "Saved in this Studio session, but the calendar display will refresh after the next dashboard refresh. Changes still reset when Studio closes."
+                return nil
+            }
+        }
+        if _, err := a.refreshEventCache(true, 90, 365); err != nil {
+            warning = "Saved in this Studio session, but the dashboard display will refresh after the next dashboard refresh. Changes still reset when Studio closes."
+        }
+        return nil
+    })
+    if err != nil {
+        if errors.Is(err, writebackpkg.ErrBusy) {
+            return nil, errors.New("calendar sync is already running; try again shortly")
+        }
+        return nil, err
+    }
+    message := showcaseSessionCalendarMessage
+    severity := "success"
+    if warning != "" {
+        message, severity = warning, "warning"
+    }
+    for _, source := range sources {
+        service.Record(source, "saved", message)
+    }
+    a.recordAction("calendars", label, severity, message, map[string]any{"source": sources[0], "uid": uid, "showcase": true})
+    response := map[string]any{"ok": true, "source": sources[len(sources)-1], "uid": uid, "action": action, "sync": "session"}
+    if warning != "" {
+        response["warning"] = warning
+    }
+    return response, nil
+}
+
+func (a *app) showcaseCalendarMove(body map[string]any) (map[string]any, error) {
+    if !a.showcaseMode() {
+        return nil, errors.New("moving calendar events is available only in Showcase Studio")
+    }
+    source := strings.TrimSpace(jsonutil.BodyString(body, "calUrl"))
+    target := strings.TrimSpace(jsonutil.BodyString(body, "targetCalUrl"))
+    uid := strings.TrimSpace(jsonutil.BodyString(body, "uid"))
+    if !a.showcaseWritableCalendarSource(source) || !a.showcaseWritableCalendarSource(target) || source == target {
+        return nil, errors.New("choose two different Studio session calendars")
+    }
+    if !showcaseCalendarUIDValid(uid) {
+        return nil, errors.New("calendar event required")
+    }
+    service := a.calendarWritebackService()
+    return a.showcaseCalendarMutationResponse(service, []string{source, target}, uid, "moved", "Move Studio calendar event", func() error {
+        if err := a.calendarWritebackSourceBlocked(source); err != nil {
+            return err
+        }
+        if err := a.calendarWritebackSourceBlocked(target); err != nil {
+            return err
+        }
+        sourceCalendar, err := service.Resolve(source)
+        if err != nil {
+            return err
+        }
+        targetCalendar, err := service.Resolve(target)
+        if err != nil {
+            return err
+        }
+        sourcePath, item, err := showcaseFindCalendarItem(sourceCalendar.Collection, uid)
+        if err != nil {
+            if errors.Is(err, os.ErrNotExist) {
+                return errors.New("calendar event is no longer available to move")
+            }
+            return err
+        }
+        text := string(item)
+        if icalwrite.IsRecurring(text) || icalwrite.HasRecurrenceID(text) || icalwrite.HasSchedulingProperties(text) {
+            return errors.New("Studio can move one-time events only; manage a recurring series instead")
+        }
+        if _, _, err := showcaseFindCalendarItem(targetCalendar.Collection, uid); err == nil {
+            return errors.New("the destination calendar already has this event")
+        } else if !errors.Is(err, os.ErrNotExist) {
+            return err
+        }
+        destinationPath := filepath.Join(targetCalendar.Collection, uid+".ics")
+        if err := fileio.WriteAtomic(destinationPath, item, 0600); err != nil {
+            return fmt.Errorf("copy event to destination calendar: %w", err)
+        }
+        if err := fileio.RemoveDurable(sourcePath); err != nil {
+            _ = fileio.RemoveDurable(destinationPath)
+            return fmt.Errorf("remove source calendar event: %w", err)
+        }
+        return nil
+    })
+}
+
+func (a *app) showcaseCalendarDeleteSeries(body map[string]any) (map[string]any, error) {
+    if !a.showcaseMode() {
+        return nil, errors.New("deleting a calendar series is available only in Showcase Studio")
+    }
+    source := strings.TrimSpace(jsonutil.BodyString(body, "calUrl"))
+    uid := strings.TrimSpace(jsonutil.BodyString(body, "uid"))
+    if !a.showcaseWritableCalendarSource(source) || !showcaseCalendarUIDValid(uid) {
+        return nil, errors.New("calendar event required")
+    }
+    service := a.calendarWritebackService()
+    return a.showcaseCalendarMutationResponse(service, []string{source}, uid, "series-deleted", "Delete Studio calendar series", func() error {
+        if err := a.calendarWritebackSourceBlocked(source); err != nil {
+            return err
+        }
+        calendar, err := service.Resolve(source)
+        if err != nil {
+            return err
+        }
+        path, item, err := showcaseFindCalendarItem(calendar.Collection, uid)
+        if err != nil {
+            if errors.Is(err, os.ErrNotExist) {
+                return errors.New("calendar series is no longer available")
+            }
+            return err
+        }
+        if !icalwrite.IsRecurring(string(item)) {
+            return errors.New("this event is not a repeating series")
+        }
+        if err := fileio.RemoveDurable(path); err != nil {
+            return fmt.Errorf("delete calendar series: %w", err)
+        }
+        return nil
+    })
+}
+
+func (a *app) showcaseCalendarManagementStatus(status, writeback map[string]any) map[string]any {
+    status["showcaseSession"] = map[string]any{
+        "enabled": true,
+        "label":   "Studio Session Calendars",
+        "detail":  "Edits are private to this Studio session and reset when Studio closes.",
+    }
+    registered := map[string]bool{}
+    for _, raw := range jsonutil.List(writeback["calendars"]) {
+        row := jsonutil.Map(raw)
+        source := strings.TrimSpace(jsonutil.StringValue(row["source"]))
+        if a.showcaseWritableCalendarSource(source) {
+            registered[source] = true
+        }
+    }
+    for _, raw := range jsonutil.List(status["calendars"]) {
+        row := jsonutil.Map(raw)
+        source := strings.TrimSpace(jsonutil.StringValue(row["url"]))
+        if a.showcaseWritableCalendarSource(source) {
+            row["kind"] = "writeback"
+            row["deleteMode"] = "hide-only"
+            row["sourceLabel"] = "Studio session calendar · writable · resets when Studio closes"
+            row["writebackRegistered"] = registered[source]
+            row["privateSelected"] = false
+            row["showcaseSession"] = true
+            continue
+        }
+        row["showcaseSession"] = false
+        row["showcaseReadOnly"] = true
+        if source != "" {
+            row["sourceLabel"] = "Studio demonstration feed · read-only"
+        }
+    }
+    return status
+}
+''')
+
+    # Let the public Studio route expose the two Studio-only operations without
+    # a user PIN. Both helpers independently enforce the exact source allowlist.
+    replace_once(
+        public_post,
+        '''	// Studio has no user PIN or remote provider. Permit deletion only for the
+	// exact disposable session collections; every normal Dashboard delete still
+	// follows the authenticated route below.
+	if path == "/api/calendar/event/delete" && a.showcaseMode() && a.showcaseWritableCalendarSource(jsonutil.BodyString(body, "calUrl")) {
+''',
+        '''	// Studio has no user PIN or remote provider. Its move and recurring-series
+	// delete operations are limited to the three disposable session collections.
+	if path == "/api/calendar/event/move" && a.showcaseMode() {
+		result, err := a.showcaseCalendarMove(body)
+		if err != nil {
+			a.err(w, err.Error(), http.StatusBadRequest)
+		} else {
+			a.json(w, result)
+		}
+		return true
+	}
+	if path == "/api/calendar/event/series/delete" && a.showcaseMode() {
+		result, err := a.showcaseCalendarDeleteSeries(body)
+		if err != nil {
+			a.err(w, err.Error(), http.StatusBadRequest)
+		} else {
+			a.json(w, result)
+		}
+		return true
+	}
+	// Studio has no user PIN or remote provider. Permit deletion only for the
+	// exact disposable session collections; every normal Dashboard delete still
+	// follows the authenticated route below.
+	if path == "/api/calendar/event/delete" && a.showcaseMode() && a.showcaseWritableCalendarSource(jsonutil.BodyString(body, "calUrl")) {
+''',
+    )
+
+    post_calendar = cmd / "http_routes_post_calendar.go"
+    replace_once(
+        post_calendar,
+        '''	case "/api/calendar/event/create", "/api/calendar/event/update", "/api/calendar/event/occurrence/update", "/api/calendar/event/series/update", "/api/calendar/event/delete", "/api/calendar/event/skip-occurrence":
+		result, err := a.handleCalendarWritebackMutation(path, body)
+''',
+        '''	case "/api/calendar/event/move":
+		result, err := a.showcaseCalendarMove(body)
+		if err != nil {
+			a.err(w, err.Error(), http.StatusBadRequest)
+			return true
+		}
+		a.json(w, result)
+	case "/api/calendar/event/series/delete":
+		result, err := a.showcaseCalendarDeleteSeries(body)
+		if err != nil {
+			a.err(w, err.Error(), http.StatusBadRequest)
+			return true
+		}
+		a.json(w, result)
+	case "/api/calendar/event/create", "/api/calendar/event/update", "/api/calendar/event/occurrence/update", "/api/calendar/event/series/update", "/api/calendar/event/delete", "/api/calendar/event/skip-occurrence":
+		result, err := a.handleCalendarWritebackMutation(path, body)
+''',
+    )
+
+    calendar_facade = cmd / "calendar_facade.go"
+    replace_once(
+        calendar_facade,
+        '''	return status
+}
+func (a *app) archiveLocalCalendar''',
+        '''	if a.showcaseMode() {
+		return a.showcaseCalendarManagementStatus(status, writeback)
+	}
+	return status
+}
+func (a *app) archiveLocalCalendar''',
+    )
+
+    # Add Move Event for one-time items and Delete Entire Series for Studio-only
+    # recurring masters. The backend still validates source, UID, and ICS shape.
+    replace_once(
+        calendar_writeback_js,
+        '''    if(cap.canEdit)row.appendChild(calendarWritebackButton("Manage event","primary",()=>openCalendarEventForm({event:ev,scope:"single"})));
+    if(cap.canOccurrenceEdit||cap.canSeriesEdit||cap.canSkip)row.appendChild(calendarWritebackButton("Manage recurring event","primary",()=>calendarWritebackRecurringManage(ev,cap)));
+''',
+        '''    if(cap.canEdit)row.appendChild(calendarWritebackButton("Manage event","primary",()=>openCalendarEventForm({event:ev,scope:"single"})));
+    if(window.DASHGO_SHOWCASE&&cap.canEdit&&typeof showcaseMoveCalendarEvent==="function")row.appendChild(calendarWritebackButton("Move event","",()=>showcaseMoveCalendarEvent(ev,status)));
+    if(cap.canOccurrenceEdit||cap.canSeriesEdit||cap.canSkip)row.appendChild(calendarWritebackButton("Manage recurring event","primary",()=>calendarWritebackRecurringManage(ev,cap)));
+''',
+    )
+    replace_once(
+        calendar_writeback_js,
+        '''    const series=el("section","calendar-writeback-recurring-scope");
+    series.appendChild(el("h3","","Entire series"));
+    if(cap.canSeriesEdit){
+      series.appendChild(el("p","","Change the title, date, time, location, or notes for this simple repeating series. Its repeat rule stays unchanged."));
+      const seriesActions=el("div","calendar-writeback-action-row");
+      seriesActions.appendChild(calendarWritebackButton("Edit entire series","",()=>openCalendarEventForm({event:ev,scope:"series"})));
+      series.appendChild(seriesActions);
+    }else{
+      series.appendChild(el("p","calendar-writeback-note","This series has an advanced repeat pattern. You can change this occurrence here; manage the repeating rule in Google, iCloud, or its original calendar app."));
+    }
+''',
+        '''    const series=el("section","calendar-writeback-recurring-scope");
+    series.appendChild(el("h3","","Entire series"));
+    const seriesActions=el("div","calendar-writeback-action-row");
+    if(cap.canSeriesEdit){
+      series.appendChild(el("p","","Change the title, date, time, location, or notes for this simple repeating series. Its repeat rule stays unchanged."));
+      seriesActions.appendChild(calendarWritebackButton("Edit entire series","",()=>openCalendarEventForm({event:ev,scope:"series"})));
+    }else{
+      series.appendChild(el("p","calendar-writeback-note",window.DASHGO_SHOWCASE?"This advanced series cannot have its repeat rule edited in Studio, but it can be removed from this temporary session.":"This series has an advanced repeat pattern. You can change this occurrence here; manage the repeating rule in Google, iCloud, or its original calendar app."));
+    }
+    if(window.DASHGO_SHOWCASE&&typeof showcaseDeleteCalendarSeries==="function")seriesActions.appendChild(calendarWritebackButton("Delete entire series","danger",()=>showcaseDeleteCalendarSeries(ev)));
+    if(seriesActions.childNodes.length)series.appendChild(seriesActions);
+''',
+    )
+
+    calendar_event_form = app / "ui/js/calendar-event-form.js"
+    replace_once(
+        calendar_event_form,
+        '''function calendarWritebackFormLabels(event,scope){
+  if(!event)return {title:"New event",when:"Add to a writable calendar",save:"Save event",note:"Changes appear on Dash-Go immediately. Remote sync follows in the background."};
+  if(scope==="occurrence")return {title:"Edit this occurrence",when:"Recurring calendar event",save:"Save this occurrence",note:"This changes only the selected occurrence. The repeating series stays unchanged; remote sync follows in the background."};
+  if(scope==="series")return {title:"Edit entire series",when:"Recurring calendar event",save:"Save entire series",note:"This changes the title, date, time, location, and notes for the series. Its repeat rule stays unchanged; remote sync follows in the background."};
+  return {title:"Manage event",when:"Calendar event",save:"Save event",note:"Changes appear on Dash-Go immediately. Remote sync follows in the background."};
+}
+''',
+        '''function calendarWritebackFormLabels(event,scope){
+  const studio=window.DASHGO_SHOWCASE===true;
+  const local=studio?"Saved only in this Studio session and reset when Studio closes.":"Changes appear on Dash-Go immediately. Remote sync follows in the background.";
+  if(!event)return {title:"New event",when:"Add to a writable calendar",save:"Save event",note:local};
+  if(scope==="occurrence")return {title:"Edit this occurrence",when:"Recurring calendar event",save:"Save this occurrence",note:studio?"This changes only the selected occurrence. The Studio session resets when it closes.":"This changes only the selected occurrence. The repeating series stays unchanged; remote sync follows in the background."};
+  if(scope==="series")return {title:"Edit entire series",when:"Recurring calendar event",save:"Save entire series",note:studio?"This changes the title, date, time, location, and notes for this Studio session. Its repeat rule stays unchanged.":"This changes the title, date, time, location, and notes for the series. Its repeat rule stays unchanged; remote sync follows in the background."};
+  return {title:"Manage event",when:"Calendar event",save:"Save event",note:local};
+}
+''',
+    )
+
+    sandbox_js = app / "ui/js/showcase-calendar-sandbox.js"
+    write(sandbox_js, r'''(function(){
+  if(!window.DASHGO_SHOWCASE)return;
+  function sourceFor(ev){return String(ev&&ev.cal&&ev.cal.url||ev&&ev.calUrl||"");}
+  function nameFor(status,source){const found=(Array.isArray(status&&status.calendars)?status.calendars:[]).find(item=>item&&String(item.source||"")===source);return String(found&&found.name||"Studio calendar");}
+  function sessionNote(){return el("p","calendar-writeback-note","Studio session only. Every edit resets when Studio closes.");}
+  window.showcaseMoveCalendarEvent=function(ev,status){
+    const source=sourceFor(ev),targets=calendarWritebackActiveCalendars(status).filter(item=>String(item&&item.source||"")!==source);
+    popupOpenTransaction({mode:"showcasemove",title:"Move event",when:"Studio session calendar",loading:"Preparing calendar move…"},()=>{
+      const root=el("section","calendar-writeback-recurring");root.append(sessionNote(),el("p","",`Move “${ev&&ev.title||"this event"}” from ${nameFor(status,source)} to:`));
+      const actions=el("div","calendar-writeback-action-row");
+      targets.forEach(target=>{const button=calendarWritebackButton("Move to "+String(target.name||"Studio calendar"),"primary",async node=>{node.disabled=true;try{const result=await calendarWritebackRequest("/api/calendar/event/move",{calUrl:source,targetCalUrl:String(target.source||""),uid:ev.uid});if(result.warning)calendarWritebackShowError(root,result.warning);await calendarWritebackRefresh();closeScrim();}catch(error){node.disabled=false;calendarWritebackShowError(root,error.message);}});actions.appendChild(button);});
+      root.appendChild(actions);const back=el("div","calendar-writeback-form-actions");back.appendChild(calendarWritebackButton("Back to event","",()=>showEventPopup(ev)));root.appendChild(back);return root;
+    });
+  };
+  window.showcaseDeleteCalendarSeries=function(ev){
+    popupOpenTransaction({mode:"showcaseseriesdelete",title:"Delete entire series?",when:"Studio session calendar",loading:"Preparing series deletion…"},()=>{
+      const root=el("section","calendar-writeback-recurring");root.append(sessionNote(),el("p","",`Delete every occurrence of “${ev&&ev.title||"this series"}” from this Studio session?`));
+      const actions=el("div","calendar-writeback-action-row");actions.append(calendarWritebackButton("Keep series","",()=>showEventPopup(ev)),calendarWritebackButton("Delete entire series","danger",async node=>{node.disabled=true;try{const result=await calendarWritebackRequest("/api/calendar/event/series/delete",{calUrl:sourceFor(ev),uid:ev.uid});if(result.warning)calendarWritebackShowError(root,result.warning);await calendarWritebackRefresh();closeScrim();}catch(error){node.disabled=false;calendarWritebackShowError(root,error.message);}}));root.appendChild(actions);return root;
+    });
+  };
+})();''')
+
+    # R6 presentation controls distinguish large native presentation sizing from
+    # exact device preview emulation. They remain session-only and never touch
+    # Windows display scale/settings.
+    write(view, r'''(function(){
+  const query=new URLSearchParams(window.location.search);
+  if(query.get("showcaseStudio")!=="1")return;
+  const hubURL=query.get("showcaseHub")||"",token=query.get("showcaseToken")||"";
+  if(!hubURL||!token)return;
+  const presets=[
+    ["presentation","fit","Presentation Fit","Use this display · high-DPI"],
+    ["landscape","wall-landscape","Wall Display Preview","1920 × 1080 CSS"],
+    ["landscape","laptop","Laptop Preview","1366 × 768 CSS"],
+    ["landscape","wide-tablet","16:10 Preview","1280 × 800 CSS"],
+    ["portrait","portrait-wall","Portrait Wall Preview","1080 × 1920 CSS"],
+    ["portrait","portrait-tablet","Portrait Tablet Preview","800 × 1280 CSS"],
+    ["portrait","portrait-four-three","4:3 Portrait Preview","768 × 1024 CSS"],
+  ];
+  const root=document.createElement("aside");root.id="showcase-view";
+  root.innerHTML="<button class='showcase-view-toggle' aria-expanded='false'>Presentation <span>▾</span></button><section class='showcase-view-panel' hidden><div class='showcase-view-head'><strong>Presentation &amp; Preview</strong><button data-clean>Clean View</button></div><p class='showcase-view-copy'>Presentation Fit uses your Windows display and DPI. Device previews emulate exact CSS viewports.</p><div data-groups></div><p class='showcase-view-status'>Presentation Fit · Native high-DPI presentation</p></section>";
+  document.body.appendChild(root);
+  const panel=root.querySelector(".showcase-view-panel"),toggle=root.querySelector(".showcase-view-toggle"),groups=root.querySelector("[data-groups]"),status=root.querySelector(".showcase-view-status");
+  const restore=document.createElement("button");restore.id="showcase-view-restore";restore.textContent="View ▸";restore.hidden=true;document.body.appendChild(restore);
+  function group(name){const box=document.createElement("section");box.className="showcase-view-group";box.innerHTML="<p>"+name+"</p><div class='showcase-view-grid'></div>";groups.appendChild(box);return box.querySelector(".showcase-view-grid");}
+  const presentation=group("Presentation"),landscape=group("Device previews"),portrait=group("Portrait previews");
+  async function pick(id,label){
+    status.textContent="Switching to "+label+"…";
+    const response=await fetch(hubURL+"/api/viewport?token="+encodeURIComponent(token),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({preset:id})});
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(result.error||"Presentation could not change.");
+    status.textContent=result.fit?"Presentation Fit · "+result.presentation:result.width+" × "+result.height+" · "+result.orientation+" · "+result.presentation;
+    panel.hidden=true;toggle.setAttribute("aria-expanded","false");
+  }
+  presets.forEach(([groupName,id,label,size])=>{const button=document.createElement("button");button.type="button";button.innerHTML="<b>"+label+"</b><small>"+size+"</small>";button.onclick=()=>pick(id,label).catch(error=>{status.textContent=error.message;});({presentation,landscape,portrait}[groupName]).appendChild(button);});
+  toggle.onclick=()=>{const open=panel.hidden;panel.hidden=!open;toggle.setAttribute("aria-expanded",String(open));};
+  root.querySelector("[data-clean]").onclick=()=>{root.hidden=true;restore.hidden=false;document.documentElement.classList.add("showcase-clean-view");};
+  restore.onclick=()=>{root.hidden=false;restore.hidden=true;document.documentElement.classList.remove("showcase-clean-view");};
+})();''')
+
+    write(css, r'''html.showcase-clean-view #showcase-tour{display:none}#showcase-tour{position:fixed;right:28px;bottom:28px;z-index:2147483000;width:min(600px,calc(100vw - 56px));padding:30px 32px;border:1px solid #78c3f1;border-radius:22px;background:#102333;color:#f7fbff;box-shadow:0 24px 68px #000b;font:19px/1.62 system-ui,-apple-system,"Segoe UI",sans-serif}#showcase-tour h2{margin:.55rem 0 .75rem;font-size:1.72rem;line-height:1.22;letter-spacing:-.015em}#showcase-tour p{margin:.45rem 0 1.35rem;color:#e8f3fb}.showcase-kicker{margin:0;color:#a9dcff;font-size:.78rem;font-weight:850;letter-spacing:.16em}.showcase-actions{display:flex;gap:11px;flex-wrap:wrap}.showcase-actions button,.showcase-dismiss,#showcase-view button,#showcase-view-restore{border:0;border-radius:12px;padding:12px 16px;background:#eef8ff;color:#0d2638;font:inherit;font-weight:780;cursor:pointer;min-height:50px}.showcase-actions button[data-next]{background:#5cbcf7;color:#062035;font-weight:850}.showcase-actions button[data-restart],.showcase-actions button[data-skip]{background:#1e3a51;color:#dceefb}.showcase-actions button:focus-visible,.showcase-dismiss:focus-visible,#showcase-view button:focus-visible{outline:3px solid #a9dcff;outline-offset:3px}.showcase-actions button:disabled{opacity:.5;cursor:default}.showcase-dismiss{position:absolute;right:13px;top:13px;min-height:0;padding:3px 10px;font-size:1.55rem;line-height:1}.showcase-lock-card{width:min(620px,calc(100vw - 42px));padding:32px;border-radius:22px;background:#102333;color:#f7fbff;box-shadow:0 24px 68px #000b;font:19px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}#showcase-location-lock{position:fixed;inset:0;z-index:2147483001;display:grid;place-items:center;padding:22px;background:#000a}#showcase-location-lock h2{margin:.45rem 0;font-size:1.7rem}#showcase-view{position:fixed;left:18px;top:18px;z-index:2147482999;font:16px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}.showcase-view-toggle{background:#102333!important;color:#f7fbff!important;box-shadow:0 10px 30px #0009}.showcase-view-panel{margin-top:8px;width:min(450px,calc(100vw - 36px));padding:20px;border:1px solid #78c3f1;border-radius:18px;background:#102333;color:#f7fbff;box-shadow:0 22px 62px #000b}.showcase-view-head{display:flex;align-items:center;justify-content:space-between;gap:14px}.showcase-view-head button{min-height:40px;padding:8px 12px}.showcase-view-copy{margin:13px 0 0;color:#d4e5f3;font-size:.92rem}.showcase-view-group>p{margin:18px 0 8px;color:#a9dcff;font-size:.76rem;font-weight:850;letter-spacing:.11em;text-transform:uppercase}.showcase-view-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.showcase-view-grid button{min-height:66px;text-align:left}.showcase-view-grid b,.showcase-view-grid small{display:block}.showcase-view-grid small{opacity:.76;margin-top:3px;font-size:.82rem}.showcase-view-status{margin:16px 0 0;color:#d4e5f3;font-size:.9rem;line-height:1.45}#showcase-view-restore{position:fixed;left:0;top:18px;z-index:2147482999;border-radius:0 12px 12px 0;background:#102333;color:#f7fbff;box-shadow:0 10px 30px #0009}@media(min-width:2200px){#showcase-tour{width:min(650px,calc(100vw - 72px));padding:36px;font-size:21px}#showcase-tour h2{font-size:1.95rem}.showcase-actions button{min-height:56px;padding:14px 18px}#showcase-view{font-size:17px}.showcase-view-panel{width:min(490px,calc(100vw - 40px));padding:23px}.showcase-view-grid button{min-height:72px}}@media(max-width:720px),(max-aspect-ratio:3/4){#showcase-tour{left:10px;right:10px;bottom:10px;width:auto;max-height:56vh;overflow:auto;padding:18px 19px;font-size:16px}#showcase-tour h2{font-size:1.42rem}.showcase-actions button{min-height:44px;padding:9px 11px}#showcase-view{left:8px;top:8px;font-size:14px}.showcase-view-panel{width:min(340px,calc(100vw - 16px));padding:15px}.showcase-view-grid{grid-template-columns:1fr}.showcase-view-grid button{min-height:52px}}
+''')
+
     manifest = app / "ui/js/bundle.manifest.json"
     data = json.loads(manifest.read_text(encoding="utf-8"))
     files = data["bundles"]["app"]
-    for name in ("showcase-tour.js", "showcase-view.js"):
+    for name in ("showcase-tour.js", "showcase-view.js", "showcase-calendar-sandbox.js"):
         if name not in files:
             files.append(name)
     manifest.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")

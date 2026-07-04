@@ -32,6 +32,7 @@ type viewportSpec struct {
 	Height      int    `json:"height"`
 	Orientation string `json:"orientation"`
 	Fit         bool   `json:"fit"`
+	Preview     bool   `json:"preview"`
 }
 
 type viewportResult struct {
@@ -41,6 +42,7 @@ type viewportResult struct {
 	Height       int    `json:"height"`
 	Orientation  string `json:"orientation"`
 	Fit          bool   `json:"fit"`
+	Preview      bool   `json:"preview"`
 	Presentation string `json:"presentation"`
 }
 
@@ -55,64 +57,53 @@ type cdpPageTargetInfo struct {
 }
 
 var showcaseViewports = []viewportSpec{
-	{ID: "fit", Label: "Fit Display", Orientation: "landscape", Fit: true},
-	{ID: "wall-landscape", Label: "Wall Display", Width: 1920, Height: 1080, Orientation: "landscape"},
-	{ID: "laptop", Label: "Common Laptop", Width: 1366, Height: 768, Orientation: "landscape"},
-	{ID: "wide-tablet", Label: "16:10 Display", Width: 1280, Height: 800, Orientation: "landscape"},
-	{ID: "portrait-wall", Label: "Portrait Wall", Width: 1080, Height: 1920, Orientation: "portrait"},
-	{ID: "portrait-tablet", Label: "Portrait Tablet", Width: 800, Height: 1280, Orientation: "portrait"},
-	{ID: "portrait-four-three", Label: "4:3 Portrait", Width: 768, Height: 1024, Orientation: "portrait"},
+	{ID: "fit", Label: "Presentation Fit", Orientation: "landscape", Fit: true},
+	{ID: "wall-landscape", Label: "Wall Display", Width: 1920, Height: 1080, Orientation: "landscape", Preview: true},
+	{ID: "laptop", Label: "Common Laptop", Width: 1366, Height: 768, Orientation: "landscape", Preview: true},
+	{ID: "wide-tablet", Label: "16:10 Display", Width: 1280, Height: 800, Orientation: "landscape", Preview: true},
+	{ID: "portrait-wall", Label: "Portrait Wall", Width: 1080, Height: 1920, Orientation: "portrait", Preview: true},
+	{ID: "portrait-tablet", Label: "Portrait Tablet", Width: 800, Height: 1280, Orientation: "portrait", Preview: true},
+	{ID: "portrait-four-three", Label: "4:3 Portrait", Width: 768, Height: 1024, Orientation: "portrait", Preview: true},
 }
 
-// startupShowcaseViewports intentionally includes a non-public compact fallback.
-// It is only used for the first normal Studio window. The interactive Showcase
-// View catalog remains the curated list above.
+// startupShowcaseViewports includes only a compact fallback. Normal Studio
+// startup is a native presentation window, not a fixed device preview.
 var startupShowcaseViewports = []viewportSpec{
-	{ID: "wall-landscape", Label: "Wall Display", Width: 1920, Height: 1080, Orientation: "landscape"},
-	{ID: "laptop", Label: "Common Laptop", Width: 1366, Height: 768, Orientation: "landscape"},
-	{ID: "wide-tablet", Label: "16:10 Display", Width: 1280, Height: 800, Orientation: "landscape"},
 	{ID: "startup-compact", Label: "Compact Startup", Width: 1024, Height: 600, Orientation: "landscape"},
 }
 
-// selectStartupViewport chooses the first normal Studio window. It prefers the
-// full 1920x1080 Wall Display whenever the display work area can host it
-// natively. When the display cannot, it sizes a best-fit landscape window to
-// the usable work area instead of dropping to a much smaller preset, capped at
-// 1920x1080 and floored at the compact startup size. Below that floor it falls
-// back to the curated startup presets. It never chooses Fit because Fit is an
-// explicit user command that maximizes later.
+const (
+	presentationHighResolutionMinimumWidth  = 2200
+	presentationHighResolutionMinimumHeight = 1200
+	presentationWorkAreaPercent             = 92
+)
+
+// selectStartupViewport chooses a high-DPI native presentation size. On a
+// standard 1080p display Studio uses essentially the available content area;
+// on 1440p/4K displays it uses a deliberate 92% margin instead of freezing at
+// 1920x1080. Device emulation remains an explicit Showcase View command.
 func selectStartupViewport(workWidth, workHeight, frameWidth, frameHeight int) (viewportSpec, bool) {
 	if workWidth < 1 || workHeight < 1 || frameWidth < 0 || frameHeight < 0 {
 		return viewportSpec{}, false
 	}
-	preferred := startupShowcaseViewports[0]
-	if preferred.Width+frameWidth <= workWidth && preferred.Height+frameHeight <= workHeight {
-		return preferred, true
+	availableWidth := workWidth - frameWidth
+	availableHeight := workHeight - frameHeight
+	compact := startupShowcaseViewports[0]
+	if availableWidth < compact.Width || availableHeight < compact.Height {
+		return viewportSpec{}, false
 	}
-	bestWidth := workWidth - frameWidth
-	bestHeight := workHeight - frameHeight
-	if bestWidth > preferred.Width {
-		bestWidth = preferred.Width
+	width, height := availableWidth, availableHeight
+	if availableWidth >= presentationHighResolutionMinimumWidth && availableHeight >= presentationHighResolutionMinimumHeight {
+		width = availableWidth * presentationWorkAreaPercent / 100
+		height = availableHeight * presentationWorkAreaPercent / 100
 	}
-	if bestHeight > preferred.Height {
-		bestHeight = preferred.Height
-	}
-	compact := startupShowcaseViewports[len(startupShowcaseViewports)-1]
-	if bestWidth >= compact.Width && bestHeight >= compact.Height {
-		return viewportSpec{
-			ID:          "startup-best-fit",
-			Label:       fmt.Sprintf("Best Fit %d \u00d7 %d", bestWidth, bestHeight),
-			Width:       bestWidth,
-			Height:      bestHeight,
-			Orientation: "landscape",
-		}, true
-	}
-	for _, view := range startupShowcaseViewports {
-		if view.Width+frameWidth <= workWidth && view.Height+frameHeight <= workHeight {
-			return view, true
-		}
-	}
-	return viewportSpec{}, false
+	return viewportSpec{
+		ID:          "startup-presentation-fit",
+		Label:       fmt.Sprintf("Presentation Fit %d × %d", width, height),
+		Width:       width,
+		Height:      height,
+		Orientation: "landscape",
+	}, true
 }
 
 func allShowcaseViewports() []viewportSpec {
@@ -189,7 +180,7 @@ func parseViewport(raw string) (viewportSpec, error) {
 	if height > width {
 		orientation = "portrait"
 	}
-	return viewportSpec{ID: "custom", Label: fmt.Sprintf("%d × %d", width, height), Width: width, Height: height, Orientation: orientation}, nil
+	return viewportSpec{ID: "custom", Label: fmt.Sprintf("%d × %d", width, height), Width: width, Height: height, Orientation: orientation, Preview: true}, nil
 }
 
 func (a *App) launchBrowser(pageURL string) error {
@@ -212,7 +203,6 @@ func (a *App) launchBrowser(pageURL string) error {
 		"--no-first-run",
 		"--no-default-browser-check",
 		"--disable-features=Translate",
-		"--force-device-scale-factor=1",
 		"--new-window",
 		"--user-data-dir=" + a.paths.browserRoot,
 		"--remote-debugging-address=127.0.0.1",
@@ -308,7 +298,7 @@ func (a *App) applyViewport(view viewportSpec) (viewportResult, error) {
 	if session == nil || session.debugPort < 1 {
 		return viewportResult{}, fmt.Errorf("the private Studio browser is not ready for a viewport change")
 	}
-	result := viewportResult{ID: view.ID, Label: view.Label, Width: view.Width, Height: view.Height, Orientation: view.Orientation, Fit: view.Fit}
+	result := viewportResult{ID: view.ID, Label: view.Label, Width: view.Width, Height: view.Height, Orientation: view.Orientation, Fit: view.Fit, Preview: view.Preview}
 	if err := applyChromiumViewport(session.debugPort, view, &result); err != nil {
 		return viewportResult{}, err
 	}
@@ -370,6 +360,14 @@ func applyChromiumViewportOnce(port int, view viewportSpec, result *viewportResu
 		return fmt.Errorf("resize Studio browser contents: %w", err)
 	}
 
+	if !view.Preview {
+		if _, err := cdpCall(port, "Emulation.clearDeviceMetricsOverride", map[string]any{}); err != nil {
+			return err
+		}
+		result.Presentation = "Native high-DPI presentation"
+		return nil
+	}
+
 	if _, err := cdpCall(port, "Emulation.setDeviceMetricsOverride", map[string]any{
 		"width":             view.Width,
 		"height":            view.Height,
@@ -389,13 +387,13 @@ func applyChromiumViewportOnce(port int, view viewportSpec, result *viewportResu
 
 	innerWidth, innerHeight, outerWidth, outerHeight := cdpWindowMetrics(metrics)
 	if innerWidth == view.Width && innerHeight == view.Height {
-		result.Presentation = "Native window + exact CSS viewport"
+		result.Presentation = "Device preview · exact CSS viewport"
 	} else {
-		result.Presentation = "Native window + scaled preview"
+		result.Presentation = "Device preview · scaled CSS viewport"
 	}
 
 	if outerWidth > 0 && outerHeight > 0 && (outerWidth < view.Width || outerHeight < view.Height) {
-		result.Presentation = "Native window + scaled preview"
+		result.Presentation = "Device preview · scaled CSS viewport"
 	}
 
 	return nil

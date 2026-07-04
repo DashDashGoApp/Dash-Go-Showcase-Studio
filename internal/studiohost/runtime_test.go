@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -224,5 +225,86 @@ func TestCleanupScenarioAfterRuntimeStopRetainsOnlySelfTestState(t *testing.T) {
 	}
 	if _, err := os.Stat(scenario); !os.IsNotExist(err) {
 		t.Fatalf("normal session cleanup left scenario state behind: %v", err)
+	}
+}
+
+func TestRebaseSessionCalendarWritebackRegistryUsesLiveScenarioHome(t *testing.T) {
+	root := t.TempDir()
+	stageHome := filepath.Join(root, ".scenario-stage-test", "home")
+	activeHome := filepath.Join(root, "scenario", "home")
+	stageCollections := filepath.Join(stageHome, ".dashboard-vdirsyncer", "collections")
+	activeCollections := filepath.Join(activeHome, ".dashboard-vdirsyncer", "collections")
+	for _, name := range []string{"showcase-family.green", "showcase-home.amber", "showcase-plans.violet"} {
+		if err := os.MkdirAll(filepath.Join(stageCollections, name), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(activeCollections, name), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	registryPath := filepath.Join(root, "registry.json")
+	body := `{
+  "version": 2,
+  "enabled": true,
+  "requirePin": false,
+  "calendars": [
+    {"source":"calendars/family.green.ics","collection":"` + filepath.ToSlash(filepath.Join(stageCollections, "showcase-family.green")) + `","writable":true,"enabled":true,"name":"Family"},
+    {"source":"calendars/home.amber.ics","collection":"` + filepath.ToSlash(filepath.Join(stageCollections, "showcase-home.amber")) + `","writable":true,"enabled":true,"name":"Home"},
+    {"source":"calendars/plans.violet.ics","collection":"` + filepath.ToSlash(filepath.Join(stageCollections, "showcase-plans.violet")) + `","writable":true,"enabled":true,"name":"Plans"}
+  ]
+}`
+	if err := os.WriteFile(registryPath, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := rebaseSessionCalendarWritebackRegistry(registryPath, stageHome, activeHome); err != nil {
+		t.Fatalf("rebaseSessionCalendarWritebackRegistry returned error: %v", err)
+	}
+	if err := assertSessionCalendarWritebackRegistry(registryPath, activeHome); err != nil {
+		t.Fatalf("rebased registry did not validate against live scenario home: %v", err)
+	}
+	registry, err := readSessionCalendarWritebackRegistry(registryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, calendar := range registry.Calendars {
+		rel, err := filepath.Rel(activeCollections, calendar.Collection)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+			t.Fatalf("calendar %q was not rebased under live scenario home: %q", calendar.Source, calendar.Collection)
+		}
+		if strings.HasPrefix(filepath.ToSlash(calendar.Collection), filepath.ToSlash(stageCollections)+"/") {
+			t.Fatalf("calendar %q still references staging collection: %q", calendar.Source, calendar.Collection)
+		}
+	}
+}
+
+func TestAssertSessionCalendarWritebackReadyRequiresAllSessionCapabilities(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/calendar/writeback/status" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"enabled":true,"requirePin":false,"calendars":[
+{"source":"calendars/family.green.ics","writable":true,"enabled":true,"deleteAllowed":true},
+{"source":"calendars/home.amber.ics","writable":true,"enabled":true,"deleteAllowed":true},
+{"source":"calendars/plans.violet.ics","writable":true,"enabled":true,"deleteAllowed":true}
+]}`))
+	}))
+	defer server.Close()
+	if err := assertSessionCalendarWritebackReadyWithRetry(server.URL, 1, 0, nil); err != nil {
+		t.Fatalf("full Studio writeback status was rejected: %v", err)
+	}
+}
+
+func TestAssertSessionCalendarWritebackReadyRejectsMissingDeleteCapability(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"enabled":true,"requirePin":false,"calendars":[
+{"source":"calendars/family.green.ics","writable":true,"enabled":true,"deleteAllowed":true},
+{"source":"calendars/home.amber.ics","writable":true,"enabled":true,"deleteAllowed":true},
+{"source":"calendars/plans.violet.ics","writable":true,"enabled":true,"deleteAllowed":false}
+]}`))
+	}))
+	defer server.Close()
+	if err := assertSessionCalendarWritebackReadyWithRetry(server.URL, 1, 0, nil); err == nil {
+		t.Fatal("writeback readiness accepted a calendar without delete capability")
 	}
 }

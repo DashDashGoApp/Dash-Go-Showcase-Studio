@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/DashDashGoApp/Dash-Go-Showcase-Studio/internal/fixtures"
@@ -24,6 +25,124 @@ type runningRuntime struct {
 	url                     string
 	done                    <-chan struct{}
 	retainScenarioAfterStop bool
+}
+
+const sessionCalendarWritebackFile = "calendar-writeback.json"
+
+var sessionCalendarWritableSources = map[string]struct{}{
+	"calendars/family.green.ics": {},
+	"calendars/home.amber.ics":   {},
+	"calendars/plans.violet.ics": {},
+}
+
+type sessionCalendarWritebackRegistry struct {
+	Version    int                                `json:"version"`
+	Enabled    bool                               `json:"enabled"`
+	RequirePIN bool                               `json:"requirePin"`
+	Calendars  []sessionCalendarWritebackCalendar `json:"calendars"`
+}
+
+type sessionCalendarWritebackCalendar struct {
+	Source     string `json:"source"`
+	Collection string `json:"collection"`
+	Writable   bool   `json:"writable"`
+	Enabled    bool   `json:"enabled"`
+	Name       string `json:"name"`
+}
+
+// rebaseSessionCalendarWritebackRegistry converts the staged absolute vdir
+// collection paths into the final private scenario-home paths before the stage
+// directory becomes live. The Dash-Go writeback registry intentionally uses
+// absolute paths and rejects collection paths outside DASHGO_HOME, so carrying
+// a .scenario-stage-* path through the atomic rename makes every Studio
+// calendar read-only even though its seeded files moved successfully.
+func rebaseSessionCalendarWritebackRegistry(registryPath, stageHome, activeHome string) error {
+	registry, err := readSessionCalendarWritebackRegistry(registryPath)
+	if err != nil {
+		return err
+	}
+	stageCollections := filepath.Join(stageHome, ".dashboard-vdirsyncer", "collections")
+	activeCollections := filepath.Join(activeHome, ".dashboard-vdirsyncer", "collections")
+	if err := validateSessionCalendarWritebackRegistry(registry, stageCollections, true); err != nil {
+		return fmt.Errorf("validate staged session calendar registry: %w", err)
+	}
+	for index := range registry.Calendars {
+		rel, err := filepath.Rel(stageCollections, registry.Calendars[index].Collection)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+			return fmt.Errorf("rebase staged calendar collection %q", registry.Calendars[index].Source)
+		}
+		registry.Calendars[index].Collection = filepath.Join(activeCollections, rel)
+	}
+	body, err := json.MarshalIndent(registry, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode rebased session calendar registry: %w", err)
+	}
+	if err := os.WriteFile(registryPath, append(body, '\n'), 0600); err != nil {
+		return fmt.Errorf("write rebased session calendar registry: %w", err)
+	}
+	return nil
+}
+
+func readSessionCalendarWritebackRegistry(path string) (sessionCalendarWritebackRegistry, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return sessionCalendarWritebackRegistry{}, fmt.Errorf("read session calendar registry: %w", err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	var registry sessionCalendarWritebackRegistry
+	if err := decoder.Decode(&registry); err != nil {
+		return sessionCalendarWritebackRegistry{}, fmt.Errorf("decode session calendar registry: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return sessionCalendarWritebackRegistry{}, fmt.Errorf("decode session calendar registry: unexpected trailing JSON value")
+		}
+		return sessionCalendarWritebackRegistry{}, fmt.Errorf("decode session calendar registry: %w", err)
+	}
+	return registry, nil
+}
+
+func validateSessionCalendarWritebackRegistry(registry sessionCalendarWritebackRegistry, collectionsRoot string, requireExisting bool) error {
+	if registry.Version != 2 || !registry.Enabled || registry.RequirePIN {
+		return fmt.Errorf("session calendar registry must be enabled version 2 without a PIN")
+	}
+	if len(registry.Calendars) != len(sessionCalendarWritableSources) {
+		return fmt.Errorf("session calendar registry must contain exactly %d writable calendars", len(sessionCalendarWritableSources))
+	}
+	seen := map[string]bool{}
+	collectionsRoot = filepath.Clean(collectionsRoot)
+	for _, calendar := range registry.Calendars {
+		source := filepath.ToSlash(strings.TrimSpace(calendar.Source))
+		if _, ok := sessionCalendarWritableSources[source]; !ok || seen[source] {
+			return fmt.Errorf("unexpected session calendar source %q", calendar.Source)
+		}
+		seen[source] = true
+		if !calendar.Writable || !calendar.Enabled || strings.TrimSpace(calendar.Name) == "" {
+			return fmt.Errorf("session calendar %q must be writable, enabled, and named", source)
+		}
+		collection := filepath.Clean(strings.TrimSpace(calendar.Collection))
+		rel, err := filepath.Rel(collectionsRoot, collection)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+			return fmt.Errorf("session calendar %q is outside the private vdir collection root", source)
+		}
+		if requireExisting {
+			info, err := os.Stat(collection)
+			if err != nil || !info.IsDir() {
+				return fmt.Errorf("session calendar %q collection is unavailable", source)
+			}
+		}
+	}
+	return nil
+}
+
+func assertSessionCalendarWritebackRegistry(registryPath, activeHome string) error {
+	registry, err := readSessionCalendarWritebackRegistry(registryPath)
+	if err != nil {
+		return err
+	}
+	return validateSessionCalendarWritebackRegistry(registry, filepath.Join(activeHome, ".dashboard-vdirsyncer", "collections"), true)
 }
 
 func (a *App) prepareScenario(scenarioID string) error {
@@ -60,11 +179,18 @@ func (a *App) prepareScenarioForLocation(scenarioID, locationID string) error {
 	if err := fixtures.SeedForLocation(stageData, stageHome, scenario.ID, locationID, time.Now()); err != nil {
 		return fmt.Errorf("seed %s: %w", scenario.Title, err)
 	}
+	if err := rebaseSessionCalendarWritebackRegistry(filepath.Join(stageData, "config", sessionCalendarWritebackFile), stageHome, a.paths.scenarioHome); err != nil {
+		return fmt.Errorf("prepare Studio session calendars: %w", err)
+	}
 	if err := fixtures.WriteRuntimeMarker(stage, scenario.ID, locationID, time.Now()); err != nil {
 		return fmt.Errorf("write Showcase marker: %w", err)
 	}
 	if err := atomicScenarioSwap(a.paths.scenarioRoot, stage); err != nil {
 		return fmt.Errorf("activate staged Showcase scenario data: %w", err)
+	}
+	if err := assertSessionCalendarWritebackRegistry(filepath.Join(a.paths.scenarioData, "config", sessionCalendarWritebackFile), a.paths.scenarioHome); err != nil {
+		_ = a.discardSessionScenario()
+		return fmt.Errorf("verify activated Studio session calendars: %w", err)
 	}
 	return nil
 }
@@ -127,6 +253,14 @@ func (a *App) startRuntime() (*runningRuntime, error) {
 			return nil, fmt.Errorf("Showcase server did not expose the active scenario data; refusing to open an empty Studio session: %w\n%s", err, tail)
 		}
 		return nil, fmt.Errorf("Showcase server did not expose the active scenario data; refusing to open an empty Studio session: %w", err)
+	}
+	if err := a.assertSessionCalendarWritebackReady(runtime.url); err != nil {
+		a.stopRuntime(runtime)
+		tail, _ := tailFile(logPath, 80*1024)
+		if tail != "" {
+			return nil, fmt.Errorf("Showcase session calendars did not become writable; refusing to open a misleading Studio session: %w\n%s", err, tail)
+		}
+		return nil, fmt.Errorf("Showcase session calendars did not become writable; refusing to open a misleading Studio session: %w", err)
 	}
 	a.mu.Lock()
 	a.runtime = runtime
@@ -313,6 +447,79 @@ func assertClientVisibleScenarioDataOnce(baseURL string) error {
 		if !bytes.Contains(body, []byte(probe.Contains)) {
 			return fmt.Errorf("%s did not contain the required Showcase fixture marker", probe.Path)
 		}
+	}
+	return nil
+}
+
+type sessionCalendarWritebackStatus struct {
+	Enabled    bool `json:"enabled"`
+	RequirePIN bool `json:"requirePin"`
+	Calendars  []struct {
+		Source        string `json:"source"`
+		Writable      bool   `json:"writable"`
+		Enabled       bool   `json:"enabled"`
+		DeleteAllowed bool   `json:"deleteAllowed"`
+	} `json:"calendars"`
+}
+
+func (a *App) assertSessionCalendarWritebackReady(baseURL string) error {
+	return assertSessionCalendarWritebackReadyWithRetry(baseURL, clientVisibleScenarioDataAttempts, clientVisibleScenarioDataRetryDelay, time.Sleep)
+}
+
+func assertSessionCalendarWritebackReadyWithRetry(baseURL string, attempts int, delay time.Duration, sleep func(time.Duration)) error {
+	if attempts < 1 {
+		attempts = 1
+	}
+	if sleep == nil {
+		sleep = time.Sleep
+	}
+	var last error
+	for attempt := 0; attempt < attempts; attempt++ {
+		last = assertSessionCalendarWritebackReadyOnce(baseURL)
+		if last == nil {
+			return nil
+		}
+		if attempt+1 < attempts && delay > 0 {
+			sleep(delay)
+		}
+	}
+	return fmt.Errorf("Studio session calendar writeback did not become ready after %d attempt(s): %w", attempts, last)
+}
+
+func assertSessionCalendarWritebackReadyOnce(baseURL string) error {
+	client := &http.Client{Timeout: 1500 * time.Millisecond}
+	response, err := client.Get(baseURL + "/api/calendar/writeback/status")
+	if err != nil {
+		return fmt.Errorf("read Studio session calendar status: %w", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 128*1024))
+	if err != nil {
+		return fmt.Errorf("read Studio session calendar status response: %w", err)
+	}
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("Studio session calendar status returned HTTP %d", response.StatusCode)
+	}
+	var status sessionCalendarWritebackStatus
+	if err := json.Unmarshal(body, &status); err != nil {
+		return fmt.Errorf("decode Studio session calendar status: %w", err)
+	}
+	if !status.Enabled || status.RequirePIN {
+		return fmt.Errorf("Studio session calendar status is disabled")
+	}
+	seen := map[string]bool{}
+	for _, calendar := range status.Calendars {
+		source := filepath.ToSlash(strings.TrimSpace(calendar.Source))
+		if _, expected := sessionCalendarWritableSources[source]; !expected {
+			continue
+		}
+		if !calendar.Writable || !calendar.Enabled || !calendar.DeleteAllowed {
+			return fmt.Errorf("Studio session calendar %q is not ready for full event management", source)
+		}
+		seen[source] = true
+	}
+	if len(seen) != len(sessionCalendarWritableSources) {
+		return fmt.Errorf("Studio did not register all session calendars for writeback")
 	}
 	return nil
 }

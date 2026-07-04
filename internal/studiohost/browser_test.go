@@ -31,6 +31,13 @@ func TestShowcaseViewportCatalogCoversLandscapePortraitAndFit(t *testing.T) {
 		}
 	}
 
+	if wall, ok := lookupShowcaseViewport("wall-landscape"); !ok || !wall.Preview {
+		t.Fatalf("wall preview must remain an explicit device emulation: %#v", wall)
+	}
+	if fit, ok := lookupShowcaseViewport("fit"); !ok || !fit.Fit || fit.Preview {
+		t.Fatalf("fit must remain native presentation sizing: %#v", fit)
+	}
+
 	for _, removed := range []string{"compact-touch", "compact-portrait"} {
 		if _, ok := lookupShowcaseViewport(removed); ok {
 			t.Fatalf("removed viewport preset %q is still present", removed)
@@ -85,8 +92,8 @@ func TestSelectStartupViewportPrefersLargestSafeLandscapePreset(t *testing.T) {
 	if !ok {
 		t.Fatal("expected a startup viewport")
 	}
-	if view.ID != "wall-landscape" || view.Width != 1920 || view.Height != 1080 {
-		t.Fatalf("startup viewport = %#v, want 1920x1080 wall-landscape", view)
+	if view.ID != "startup-presentation-fit" || view.Width != 2340 || view.Height != 1251 || view.Preview {
+		t.Fatalf("startup viewport = %#v, want native 2340x1251 presentation fit", view)
 	}
 }
 
@@ -95,26 +102,26 @@ func TestSelectStartupViewportBestFitsWhenWallDisplayCannotFitNatively(t *testin
 	if !ok {
 		t.Fatal("expected a best-fit startup viewport")
 	}
-	if view.ID != "startup-best-fit" || view.Width != 1904 || view.Height != 1000 || view.Orientation != "landscape" {
-		t.Fatalf("startup viewport = %#v, want 1904x1000 startup-best-fit", view)
+	if view.ID != "startup-presentation-fit" || view.Width != 1904 || view.Height != 1000 || view.Orientation != "landscape" || view.Preview {
+		t.Fatalf("startup viewport = %#v, want 1904x1000 native presentation fit", view)
 	}
 
 	laptop, ok := selectStartupViewport(1366, 768, 16, 80)
 	if !ok {
 		t.Fatal("expected a best-fit startup viewport on a laptop display")
 	}
-	if laptop.ID != "startup-best-fit" || laptop.Width != 1350 || laptop.Height != 688 {
-		t.Fatalf("laptop startup viewport = %#v, want 1350x688 startup-best-fit", laptop)
+	if laptop.ID != "startup-presentation-fit" || laptop.Width != 1350 || laptop.Height != 688 || laptop.Preview {
+		t.Fatalf("laptop startup viewport = %#v, want 1350x688 native presentation fit", laptop)
 	}
 }
 
-func TestSelectStartupViewportNeverExceedsWallDisplay(t *testing.T) {
-	view, ok := selectStartupViewport(2560, 1440, 16, 80)
+func TestSelectStartupViewportUsesHighResolutionWorkArea(t *testing.T) {
+	view, ok := selectStartupViewport(3840, 2160, 16, 80)
 	if !ok {
 		t.Fatal("expected a startup viewport")
 	}
-	if view.Width > 1920 || view.Height > 1080 {
-		t.Fatalf("startup viewport exceeds the Wall Display cap: %#v", view)
+	if view.Width != 3518 || view.Height != 1913 || view.Width <= 1920 || view.Height <= 1080 || view.Preview {
+		t.Fatalf("startup viewport = %#v, want native 3518x1913 high-resolution presentation", view)
 	}
 }
 

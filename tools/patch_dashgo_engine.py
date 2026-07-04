@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply the narrow Dash-Go 1.5.2 Showcase portability overlay to a staged copy.
+"""Apply the narrow Dash-Go 1.5.7 Showcase portability overlay to a staged copy.
 
 The script intentionally uses exact replacement anchors. A changed upstream source
 must fail here rather than silently producing a partial or guessed port.
@@ -254,6 +254,18 @@ def apply(app: Path) -> None:
     http_server = cmd / "http_server.go"
     replace_once(
         http_server,
+        '''\tclean := filepath.Clean("/" + strings.TrimPrefix(path, "/"))
+\trel := strings.TrimPrefix(clean, "/")
+''',
+        '''\t// URLs use '/' even on Windows. filepath.Clean is host-OS-specific
+\t// and turns this key into a backslash-prefixed path on Windows, which misses
+\t// the Showcase browser-data allowlist. Keep URL normalization portable.
+\t// Use a URL-path helper before staticPrivatePath and showcaseStaticDataPath.
+\trel := showcaseStaticRelativePath(path)
+''',
+    )
+    replace_once(
+        http_server,
         '''\tfull := filepath.Join(a.dash, rel)
 \tif !strings.HasPrefix(full, a.dash) || staticPrivatePath(rel) {
 \t\tsetNoStore(w)
@@ -361,6 +373,7 @@ package main
 import (
 	"errors"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -391,6 +404,15 @@ func (a *app) showcaseMode() bool {
 	// boolean flag while preserving the explicit private data root.
 	return strings.TrimSpace(os.Getenv("DASHGO_SHOWCASE")) == "1" ||
 		strings.TrimSpace(os.Getenv("DASHGO_SHOWCASE_DATA_ROOT")) != ""
+}
+
+// showcaseStaticRelativePath normalizes an HTTP URL path, not an operating
+// system filename. The standard path package always uses '/', whereas
+// filepath.Clean converts to '\\' on Windows and can make the allowlist key
+// fail to match the browser-visible Showcase data files.
+func showcaseStaticRelativePath(requestPath string) string {
+	clean := pathpkg.Clean("/" + strings.TrimPrefix(requestPath, "/"))
+	return strings.TrimPrefix(clean, "/")
 }
 
 // showcaseStaticDataPath is deliberately narrow. Studio's immutable package
@@ -596,6 +618,25 @@ func (a *app) showcaseGeocode(query string) map[string]any {
 	return map[string]any{"results": results, "studioPreview": true}
 }
 ''')
+    write(cmd / "showcase_static_path_test.go", r'''
+package main
+
+import "testing"
+
+func TestShowcaseStaticRelativePathUsesURLSeparators(t *testing.T) {
+	cases := map[string]string{
+		"/config/config.local.js":            "config/config.local.js",
+		"config/../calendars/calendars.json": "calendars/calendars.json",
+		"//calendars/showcase-studio.ics":    "calendars/showcase-studio.ics",
+	}
+	for requestPath, want := range cases {
+		if got := showcaseStaticRelativePath(requestPath); got != want {
+			t.Fatalf("showcaseStaticRelativePath(%q) = %q, want %q", requestPath, got, want)
+		}
+	}
+}
+''')
+
     write(cmd / "portable_runtime_unix.go", r'''
 
 //go:build !windows

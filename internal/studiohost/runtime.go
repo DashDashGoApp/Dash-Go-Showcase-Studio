@@ -205,11 +205,56 @@ var requiredClientVisibleScenarioData = []clientVisibleScenarioData{
 	{Path: "/api/weather", Contains: "showcase-fixture", ParseJSON: true},
 }
 
+const (
+	clientVisibleScenarioDataAttempts   = 30
+	clientVisibleScenarioDataRetryDelay = 100 * time.Millisecond
+)
+
 // assertClientVisibleScenarioData verifies the exact files and local endpoint
 // the browser consumes. Readiness alone only proves that the server bound its
 // loopback port; it does not prove that the disposable scenario root and
 // offline preview data are visible to the dashboard UI.
+//
+// On Windows, a just-renamed scenario directory can be visible to the child
+// server before every individual fixture file is immediately openable. Do not
+// open the browser on that first transient response: wait a short, bounded
+// time for every browser-consumed route to become visible.
 func (a *App) assertClientVisibleScenarioData(baseURL string) error {
+	return assertClientVisibleScenarioDataWithRetry(
+		baseURL,
+		clientVisibleScenarioDataAttempts,
+		clientVisibleScenarioDataRetryDelay,
+		time.Sleep,
+	)
+}
+
+func assertClientVisibleScenarioDataWithRetry(
+	baseURL string,
+	attempts int,
+	delay time.Duration,
+	sleep func(time.Duration),
+) error {
+	if attempts < 1 {
+		attempts = 1
+	}
+	if sleep == nil {
+		sleep = time.Sleep
+	}
+
+	var last error
+	for attempt := 0; attempt < attempts; attempt++ {
+		last = assertClientVisibleScenarioDataOnce(baseURL)
+		if last == nil {
+			return nil
+		}
+		if attempt+1 < attempts && delay > 0 {
+			sleep(delay)
+		}
+	}
+	return fmt.Errorf("Showcase scenario data did not become client-visible after %d attempt(s): %w", attempts, last)
+}
+
+func assertClientVisibleScenarioDataOnce(baseURL string) error {
 	client := &http.Client{Timeout: 1500 * time.Millisecond}
 	for _, probe := range requiredClientVisibleScenarioData {
 		response, err := client.Get(baseURL + probe.Path)

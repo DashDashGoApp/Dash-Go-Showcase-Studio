@@ -385,24 +385,28 @@ func dashGoShowcaseDataRoot(assetRoot string) string {
 }
 
 func (a *app) showcaseMode() bool {
-	return strings.TrimSpace(os.Getenv("DASHGO_SHOWCASE")) == "1"
+	// The data-root contract is sufficient to identify an isolated Studio
+	// runtime. Keeping it as a fallback makes the browser-data route resilient
+	// if a Windows child-process environment normalizes or omits the companion
+	// boolean flag while preserving the explicit private data root.
+	return strings.TrimSpace(os.Getenv("DASHGO_SHOWCASE")) == "1" ||
+		strings.TrimSpace(os.Getenv("DASHGO_SHOWCASE_DATA_ROOT")) != ""
 }
 
 // showcaseStaticDataPath is deliberately narrow. Studio's immutable package
 // omits mutable config, calendar, and cache trees, while Dash-Go's browser
-// still reads a small set of local files directly. Route only those known,
-// generated fixture files into the private scenario root.
+// still reads a small set of local files directly. Resolve every allowlisted
+// path directly from the configured private data root rather than through
+// app-initialization fields, so the browser route remains tied to the same
+// explicit runtime contract on every platform.
 func (a *app) showcaseStaticDataPath(rel string) (string, bool) {
 	if !a.showcaseMode() {
 		return "", false
 	}
 	switch rel {
-	case "config/config.local.js", "config/compliments.json", "config/message-cache.json", "config/temp-messages.json", "config/scheduled-messages.json", "config/settings.json":
-		return filepath.Join(a.configDir, strings.TrimPrefix(rel, "config/")), true
-	case "calendars/calendars.json", "calendars/showcase-studio.ics":
-		return filepath.Join(a.calDir, strings.TrimPrefix(rel, "calendars/")), true
-	case "cache/events.cache.json":
-		return filepath.Join(a.cacheDir, "events.cache.json"), true
+	case "config/config.local.js", "config/compliments.json", "config/message-cache.json", "config/temp-messages.json", "config/scheduled-messages.json", "config/settings.json",
+		"calendars/calendars.json", "calendars/showcase-studio.ics", "cache/events.cache.json":
+		return filepath.Join(dashGoShowcaseDataRoot(a.dash), filepath.FromSlash(rel)), true
 	default:
 		return "", false
 	}

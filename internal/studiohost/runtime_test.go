@@ -3,6 +3,8 @@ package studiohost
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"syscall"
 	"testing"
 	"time"
@@ -78,5 +80,42 @@ func TestScenarioRenameBackoffIsBounded(t *testing.T) {
 	}
 	if got := scenarioRenameBackoff(20); got != scenarioRenameMaximumDelay {
 		t.Fatalf("late delay=%s, want %s", got, scenarioRenameMaximumDelay)
+	}
+}
+
+func TestAssertClientVisibleScenarioData(t *testing.T) {
+	responses := map[string]string{
+		"/config/config.local.js":        "// Generated for Dash-Go Showcase Studio.\n",
+		"/config/compliments.json":       `{"messages":[{"origin":"studio-normal"}]}`,
+		"/calendars/calendars.json":      `[{"url":"calendars/showcase-studio.ics"}]`,
+		"/calendars/showcase-studio.ics": "BEGIN:VCALENDAR\r\nSUMMARY:Breakfast together\r\nEND:VCALENDAR\r\n",
+		"/api/weather":                   `{"source":"showcase-fixture","sources":[{"_source":"showcase"}]}`,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, ok := responses[r.URL.Path]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Path == "/config/compliments.json" || r.URL.Path == "/calendars/calendars.json" || r.URL.Path == "/api/weather" {
+			w.Header().Set("Content-Type", "application/json")
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	if err := (&App{}).assertClientVisibleScenarioData(server.URL); err != nil {
+		t.Fatalf("assertClientVisibleScenarioData returned error: %v", err)
+	}
+}
+
+func TestAssertClientVisibleScenarioDataRejectsFallbackContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer server.Close()
+
+	if err := (&App{}).assertClientVisibleScenarioData(server.URL); err == nil {
+		t.Fatal("assertClientVisibleScenarioData accepted a missing fixture marker")
 	}
 }

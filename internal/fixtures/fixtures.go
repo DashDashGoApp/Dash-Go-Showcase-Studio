@@ -157,6 +157,21 @@ func SeedForLocation(appRoot, home, scenarioID, locationID string, now time.Time
 	if err := writeCalendar(filepath.Join(calendarDir, "showcase-studio.ics"), scenario.ID, today, now.Location(), profile); err != nil {
 		return err
 	}
+	// The dashboard browser discovers local calendars through this manifest before
+	// it requests the ICS file. Studio packages intentionally exclude mutable
+	// runtime data, so seed the manifest with the fixture rather than relying on
+	// the appliance-side calendar job to create it later.
+	if err := writeJSON(filepath.Join(calendarDir, "calendars.json"), []any{
+		map[string]any{
+			"url":     "calendars/showcase-studio.ics",
+			"name":    "Showcase Studio",
+			"color":   "#7fd6a8",
+			"enabled": true,
+			"tag":     "showcase",
+		},
+	}, 0644); err != nil {
+		return err
+	}
 	if err := writeJSON(filepath.Join(config, "chalkboard.json"), map[string]any{"version": 1, "strokes": []any{}}, 0644); err != nil {
 		return err
 	}

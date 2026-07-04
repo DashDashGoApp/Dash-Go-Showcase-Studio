@@ -251,6 +251,32 @@ def apply(app: Path) -> None:
 ''',
     )
 
+    http_server = cmd / "http_server.go"
+    replace_once(
+        http_server,
+        '''\tfull := filepath.Join(a.dash, rel)
+\tif !strings.HasPrefix(full, a.dash) || staticPrivatePath(rel) {
+\t\tsetNoStore(w)
+\t\thttp.NotFound(w, r)
+\t\treturn
+\t}
+''',
+        '''\tfull := filepath.Join(a.dash, rel)
+\tif staticPrivatePath(rel) {
+\t\tsetNoStore(w)
+\t\thttp.NotFound(w, r)
+\t\treturn
+\t}
+\tif showcasePath, ok := a.showcaseStaticDataPath(rel); ok {
+\t\tfull = showcasePath
+\t} else if !strings.HasPrefix(full, a.dash) {
+\t\tsetNoStore(w)
+\t\thttp.NotFound(w, r)
+\t\treturn
+\t}
+''',
+    )
+
     get = cmd / "http_routes_get.go"
     replace_once(
         get,
@@ -289,6 +315,20 @@ def apply(app: Path) -> None:
 ''',
     )
 
+    weather_facade = cmd / "weather_facade.go"
+    replace_once(
+        weather_facade,
+        '''func (a *app) weatherPayload() any          { return a.weatherService().Payload() }
+''',
+        '''func (a *app) weatherPayload() any {
+	if a.showcaseMode() {
+		return a.showcaseWeatherPayload()
+	}
+	return a.weatherService().Payload()
+}
+''',
+    )
+
     dashboard_update = cmd / "dashboard_update.go"
     replace_once(
         dashboard_update,
@@ -323,6 +363,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func dashGoRuntimeHome() string {
@@ -345,6 +386,26 @@ func dashGoShowcaseDataRoot(assetRoot string) string {
 
 func (a *app) showcaseMode() bool {
 	return strings.TrimSpace(os.Getenv("DASHGO_SHOWCASE")) == "1"
+}
+
+// showcaseStaticDataPath is deliberately narrow. Studio's immutable package
+// omits mutable config, calendar, and cache trees, while Dash-Go's browser
+// still reads a small set of local files directly. Route only those known,
+// generated fixture files into the private scenario root.
+func (a *app) showcaseStaticDataPath(rel string) (string, bool) {
+	if !a.showcaseMode() {
+		return "", false
+	}
+	switch rel {
+	case "config/config.local.js", "config/compliments.json", "config/message-cache.json", "config/temp-messages.json", "config/scheduled-messages.json", "config/settings.json":
+		return filepath.Join(a.configDir, strings.TrimPrefix(rel, "config/")), true
+	case "calendars/calendars.json", "calendars/showcase-studio.ics":
+		return filepath.Join(a.calDir, strings.TrimPrefix(rel, "calendars/")), true
+	case "cache/events.cache.json":
+		return filepath.Join(a.cacheDir, "events.cache.json"), true
+	default:
+		return "", false
+	}
 }
 
 func showcaseUnavailable(action string) error {
@@ -370,6 +431,93 @@ func (a *app) showcaseUpdateAvailability() map[string]any {
 	}
 }
 
+// showcaseWeatherPayload is deliberately offline and deterministic in shape,
+// while using today's local date so the dashboard has a useful forecast during
+// every Studio session. It never calls an external provider.
+func (a *app) showcaseWeatherPayload() map[string]any {
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	highs := []int{78, 80, 76, 73, 75, 79, 82}
+	lows := []int{61, 63, 60, 57, 58, 62, 65}
+	codes := []int{2, 1, 61, 3, 2, 0, 1}
+	precipitation := []float64{0, 0, 0.18, 0.04, 0, 0, 0}
+	probability := []int{5, 5, 55, 25, 10, 5, 5}
+	winds := []int{9, 11, 14, 12, 10, 8, 10}
+	uv := []int{6, 7, 4, 5, 6, 7, 7}
+	daily := map[string]any{
+		"time":                          []any{},
+		"weather_code":                  []any{},
+		"temperature_2m_max":            []any{},
+		"temperature_2m_min":            []any{},
+		"apparent_temperature_max":      []any{},
+		"precipitation_sum":             []any{},
+		"precipitation_probability_max": []any{},
+		"wind_speed_10m_max":            []any{},
+		"uv_index_max":                  []any{},
+		"sunrise":                       []any{},
+		"sunset":                        []any{},
+	}
+	for i := range highs {
+		date := today.AddDate(0, 0, i)
+		daily["time"] = append(daily["time"].([]any), date.Format("2006-01-02"))
+		daily["weather_code"] = append(daily["weather_code"].([]any), codes[i])
+		daily["temperature_2m_max"] = append(daily["temperature_2m_max"].([]any), highs[i])
+		daily["temperature_2m_min"] = append(daily["temperature_2m_min"].([]any), lows[i])
+		daily["apparent_temperature_max"] = append(daily["apparent_temperature_max"].([]any), highs[i]-1)
+		daily["precipitation_sum"] = append(daily["precipitation_sum"].([]any), precipitation[i])
+		daily["precipitation_probability_max"] = append(daily["precipitation_probability_max"].([]any), probability[i])
+		daily["wind_speed_10m_max"] = append(daily["wind_speed_10m_max"].([]any), winds[i])
+		daily["uv_index_max"] = append(daily["uv_index_max"].([]any), uv[i])
+		daily["sunrise"] = append(daily["sunrise"].([]any), date.Add(6*time.Hour+12*time.Minute).Format(time.RFC3339))
+		daily["sunset"] = append(daily["sunset"].([]any), date.Add(19*time.Hour+48*time.Minute).Format(time.RFC3339))
+	}
+
+	hourlyTimes := []any{}
+	hourlyTemperatures := []any{}
+	hourlyCodes := []any{}
+	hourlyProbability := []any{}
+	for _, hour := range []int{6, 9, 12, 15, 18, 21} {
+		hourlyTimes = append(hourlyTimes, today.Add(time.Duration(hour)*time.Hour).Format(time.RFC3339))
+		hourlyTemperatures = append(hourlyTemperatures, 64+(hour-6)/3*4)
+		hourlyCodes = append(hourlyCodes, 2)
+		hourlyProbability = append(hourlyProbability, 5)
+	}
+	hourly := map[string]any{
+		"time":                      hourlyTimes,
+		"temperature_2m":            hourlyTemperatures,
+		"weather_code":              hourlyCodes,
+		"precipitation_probability": hourlyProbability,
+	}
+	current := map[string]any{
+		"temperature_2m":       72,
+		"apparent_temperature": 71,
+		"weather_code":         2,
+		"wind_speed_10m":       9,
+		"relative_humidity_2m": 54,
+	}
+	source := map[string]any{
+		"_source":      "showcase",
+		"_sourceLabel": "Studio Preview Forecast",
+		"current":      current,
+		"daily":        daily,
+		"hourly":       hourly,
+		"alerts":       []any{},
+	}
+	status := []any{map[string]any{
+		"id": "showcase", "label": "Studio Preview Forecast", "tier": "offline fixture",
+		"ok": true, "freshness": "synthetic", "generator": "showcase",
+	}}
+	return map[string]any{
+		"current": current, "daily": daily, "hourly": hourly, "alerts": []any{},
+		"selected": []any{"showcase"}, "sources": []any{source},
+		"status": status, "sourceHealth": status,
+		"cache":              map[string]any{"hit": true, "synthetic": true, "generatedAt": now.Unix()},
+		"weatherBlend":       map[string]any{"ok": true, "method": "offline Studio fixture", "sourceCount": 1, "generator": "showcase"},
+		"keysInServedConfig": false, "source": "showcase-fixture", "generator": "showcase",
+	}
+}
+
 func (a *app) showcaseRestrictedPost(path string, body map[string]any) string {
 	if !a.showcaseMode() {
 		return ""
@@ -377,6 +525,8 @@ func (a *app) showcaseRestrictedPost(path string, body map[string]any) string {
 	switch path {
 	case "/api/location":
 		return "studio_location_locked"
+	case "/api/weather/refresh":
+		return "studio_offline_weather_fixture"
 	case "/api/display/off", "/api/display/on", "/api/browser/restart", "/api/terminal/open",
 		"/api/system-update", "/api/doctor", "/api/update/track/toggle", "/api/update",
 		"/api/reboot", "/api/poweroff", "/api/moon/update", "/api/calendars/sync":

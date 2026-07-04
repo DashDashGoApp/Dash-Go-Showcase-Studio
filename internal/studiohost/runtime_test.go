@@ -10,6 +10,24 @@ import (
 	"time"
 )
 
+func showcaseClientVisibleResponses() map[string]string {
+	return map[string]string{
+		"/config/config.local.js":  "// Generated for Dash-Go Showcase Studio.\n",
+		"/config/compliments.json": `{"messages":[{"origin":"studio-normal"}]}`,
+		"/calendars/calendars.json": `[
+			{"url":"calendars/family.green.ics"},
+			{"url":"calendars/school.blue.ics"},
+			{"url":"calendars/home.amber.ics"},
+			{"url":"calendars/plans.violet.ics"}
+		]`,
+		"/calendars/family.green.ics": "BEGIN:VCALENDAR\r\nSUMMARY:Breakfast together\r\nEND:VCALENDAR\r\n",
+		"/calendars/school.blue.ics":  "BEGIN:VCALENDAR\r\nSUMMARY:School showcase\r\nEND:VCALENDAR\r\n",
+		"/calendars/home.amber.ics":   "BEGIN:VCALENDAR\r\nSUMMARY:Meal prep\r\nEND:VCALENDAR\r\n",
+		"/calendars/plans.violet.ics": "BEGIN:VCALENDAR\r\nSUMMARY:Morning ready\r\nEND:VCALENDAR\r\n",
+		"/api/weather":                `{"source":"showcase-fixture","sources":[{"_source":"showcase"}]}`,
+	}
+}
+
 func TestRetryScenarioRenameRetriesTransientWindowsAccessDenied(t *testing.T) {
 	calls := 0
 	sleeps := 0
@@ -84,13 +102,7 @@ func TestScenarioRenameBackoffIsBounded(t *testing.T) {
 }
 
 func TestAssertClientVisibleScenarioData(t *testing.T) {
-	responses := map[string]string{
-		"/config/config.local.js":        "// Generated for Dash-Go Showcase Studio.\n",
-		"/config/compliments.json":       `{"messages":[{"origin":"studio-normal"}]}`,
-		"/calendars/calendars.json":      `[{"url":"calendars/showcase-studio.ics"}]`,
-		"/calendars/showcase-studio.ics": "BEGIN:VCALENDAR\r\nSUMMARY:Breakfast together\r\nEND:VCALENDAR\r\n",
-		"/api/weather":                   `{"source":"showcase-fixture","sources":[{"_source":"showcase"}]}`,
-	}
+	responses := showcaseClientVisibleResponses()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, ok := responses[r.URL.Path]
 		if !ok {
@@ -110,13 +122,7 @@ func TestAssertClientVisibleScenarioData(t *testing.T) {
 }
 
 func TestAssertClientVisibleScenarioDataRetriesTransientFixtureVisibility(t *testing.T) {
-	responses := map[string]string{
-		"/config/config.local.js":        "// Generated for Dash-Go Showcase Studio.\n",
-		"/config/compliments.json":       `{"messages":[{"origin":"studio-normal"}]}`,
-		"/calendars/calendars.json":      `[{"url":"calendars/showcase-studio.ics"}]`,
-		"/calendars/showcase-studio.ics": "BEGIN:VCALENDAR\r\nSUMMARY:Breakfast together\r\nEND:VCALENDAR\r\n",
-		"/api/weather":                   `{"source":"showcase-fixture","sources":[{"_source":"showcase"}]}`,
-	}
+	responses := showcaseClientVisibleResponses()
 	configRequests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/config/config.local.js" {

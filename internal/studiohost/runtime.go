@@ -200,8 +200,14 @@ type clientVisibleScenarioData struct {
 var requiredClientVisibleScenarioData = []clientVisibleScenarioData{
 	{Path: "/config/config.local.js", Contains: "Generated for Dash-Go Showcase Studio"},
 	{Path: "/config/compliments.json", Contains: "studio-normal", ParseJSON: true},
-	{Path: "/calendars/calendars.json", Contains: "calendars/showcase-studio.ics", ParseJSON: true},
-	{Path: "/calendars/showcase-studio.ics", Contains: "SUMMARY:Breakfast together"},
+	{Path: "/calendars/calendars.json", Contains: "calendars/family.green.ics", ParseJSON: true},
+	{Path: "/calendars/calendars.json", Contains: "calendars/school.blue.ics", ParseJSON: true},
+	{Path: "/calendars/calendars.json", Contains: "calendars/home.amber.ics", ParseJSON: true},
+	{Path: "/calendars/calendars.json", Contains: "calendars/plans.violet.ics", ParseJSON: true},
+	{Path: "/calendars/family.green.ics", Contains: "SUMMARY:Breakfast together"},
+	{Path: "/calendars/school.blue.ics", Contains: "SUMMARY:School showcase"},
+	{Path: "/calendars/home.amber.ics", Contains: "SUMMARY:Meal prep"},
+	{Path: "/calendars/plans.violet.ics", Contains: "SUMMARY:Morning ready"},
 	{Path: "/api/weather", Contains: "showcase-fixture", ParseJSON: true},
 }
 

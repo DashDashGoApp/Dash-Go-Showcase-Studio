@@ -427,7 +427,7 @@ func (a *app) showcaseStaticDataPath(rel string) (string, bool) {
 	}
 	switch rel {
 	case "config/config.local.js", "config/compliments.json", "config/message-cache.json", "config/temp-messages.json", "config/scheduled-messages.json", "config/settings.json",
-		"calendars/calendars.json", "calendars/showcase-studio.ics", "cache/events.cache.json":
+		"calendars/calendars.json", "calendars/family.green.ics", "calendars/school.blue.ics", "calendars/home.amber.ics", "calendars/plans.violet.ics", "cache/events.cache.json":
 		return filepath.Join(dashGoShowcaseDataRoot(a.dash), filepath.FromSlash(rel)), true
 	default:
 		return "", false
@@ -621,18 +621,49 @@ func (a *app) showcaseGeocode(query string) map[string]any {
     write(cmd / "showcase_static_path_test.go", r'''
 package main
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestShowcaseStaticRelativePathUsesURLSeparators(t *testing.T) {
 	cases := map[string]string{
 		"/config/config.local.js":            "config/config.local.js",
 		"config/../calendars/calendars.json": "calendars/calendars.json",
-		"//calendars/showcase-studio.ics":    "calendars/showcase-studio.ics",
+		"//calendars/family.green.ics":       "calendars/family.green.ics",
 	}
 	for requestPath, want := range cases {
 		if got := showcaseStaticRelativePath(requestPath); got != want {
 			t.Fatalf("showcaseStaticRelativePath(%q) = %q, want %q", requestPath, got, want)
 		}
+	}
+}
+
+func TestShowcaseStaticDataPathAllowsEverySeededCalendar(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DASHGO_SHOWCASE", "1")
+	t.Setenv("DASHGO_SHOWCASE_DATA_ROOT", root)
+	a := &app{dash: filepath.Join(root, "assets")}
+
+	for _, rel := range []string{
+		"calendars/calendars.json",
+		"calendars/family.green.ics",
+		"calendars/school.blue.ics",
+		"calendars/home.amber.ics",
+		"calendars/plans.violet.ics",
+	} {
+		got, ok := a.showcaseStaticDataPath(rel)
+		want := filepath.Join(root, filepath.FromSlash(rel))
+		if !ok || got != want {
+			t.Fatalf("showcaseStaticDataPath(%q) = %q, %v; want %q, true", rel, got, ok, want)
+		}
+	}
+
+	if _, ok := a.showcaseStaticDataPath("calendars/showcase-studio.ics"); ok {
+		t.Fatal("retired one-calendar fixture path was unexpectedly allowed")
+	}
+	if _, ok := a.showcaseStaticDataPath("calendars/unknown.ics"); ok {
+		t.Fatal("unknown calendar path was unexpectedly allowed")
 	}
 }
 ''')

@@ -367,6 +367,126 @@ def apply(app: Path) -> None:
 ''',
     )
 
+    calendar_writeback = cmd / "calendar_writeback.go"
+    replace_once(
+        calendar_writeback,
+        """func (a *app) calendarWritebackDeleteAllowed(source string) bool {
+\tif !a.calendarWritebackService().SourceWritable(source) || !a.lockConfigAvailable() {
+\t\treturn false
+\t}
+\treturn a.lockConfig()[\"enabled\"] == true
+}
+""",
+        """func (a *app) calendarWritebackDeleteAllowed(source string) bool {
+\tif a.showcaseMode() {
+\t\t// Studio's three user-managed calendars live only in the disposable
+\t\t// scenario home. Deletion is safe there and resets at the next launch.
+\t\treturn a.showcaseWritableCalendarSource(source)
+\t}
+\tif !a.calendarWritebackService().SourceWritable(source) || !a.lockConfigAvailable() {
+\t\treturn false
+\t}
+\treturn a.lockConfig()[\"enabled\"] == true
+}
+""",
+    )
+    replace_once(
+        calendar_writeback,
+        """\tmessage := \"Saved locally; remote sync queued.\"
+\tif refreshErr != nil {
+\t\tmessage = \"Saved locally; remote sync queued. Dashboard refresh will retry automatically.\"
+\t}
+\taction := map[string]string{\"created\": \"Add calendar event\", \"updated\": \"Manage calendar event\", \"occurrence-updated\": \"Edit calendar occurrence\", \"series-updated\": \"Edit recurring series\", \"deleted\": \"Delete calendar event\", \"skipped\": \"Skip calendar occurrence\"}[result.Action]
+\tif persistErr := a.recordCalendarWritebackMutation(result.Source, result.Pair, result.Collection, result.FinalDelete); persistErr != nil {
+\t\tmessage = \"Saved locally, but Dash-Go could not update its durable private-calendar sync authorization. Remote sync is paused for safety; review the calendar before retrying.\"
+\t\tservice.Record(result.Source, \"attention\", message)
+\t\ta.recordAction(\"calendars\", action, \"warning\", message, map[string]any{\"source\": result.Source, \"uid\": result.UID})
+\t\treturn map[string]any{\"ok\": true, \"source\": result.Source, \"uid\": result.UID, \"action\": result.Action, \"sync\": \"attention\", \"warning\": message}, nil
+\t}
+\tservice.Record(result.Source, \"saved\", message)
+\ta.queueCalendarWritebackSync(result.Source, result.Pair, true)
+\tseverity := \"success\"
+\tif refreshErr != nil {
+\t\tseverity = \"warning\"
+\t}
+\ta.recordAction(\"calendars\", action, severity, message, map[string]any{\"source\": result.Source, \"uid\": result.UID})
+\tresponse := map[string]any{\"ok\": true, \"source\": result.Source, \"uid\": result.UID, \"action\": result.Action, \"sync\": \"queued\"}
+\tif refreshErr != nil {
+\t\tresponse[\"warning\"] = message
+\t}
+\treturn response, nil
+""",
+        """\taction := map[string]string{\"created\": \"Add calendar event\", \"updated\": \"Manage calendar event\", \"occurrence-updated\": \"Edit calendar occurrence\", \"series-updated\": \"Edit recurring series\", \"deleted\": \"Delete calendar event\", \"skipped\": \"Skip calendar occurrence\"}[result.Action]
+\tif a.showcaseMode() && a.showcaseWritableCalendarSource(result.Source) {
+\t\tmessage := \"Saved in this Studio session. Changes reset when Studio closes.\"
+\t\tseverity := \"success\"
+\t\tif refreshErr != nil {
+\t\t\tmessage = \"Saved in this Studio session. Dashboard refresh will retry automatically; changes still reset when Studio closes.\"
+\t\t\tseverity = \"warning\"
+\t\t}
+\t\tservice.Record(result.Source, \"saved\", message)
+\t\ta.recordAction(\"calendars\", action, severity, message, map[string]any{\"source\": result.Source, \"uid\": result.UID, \"showcase\": true})
+\t\tresponse := map[string]any{\"ok\": true, \"source\": result.Source, \"uid\": result.UID, \"action\": result.Action, \"sync\": \"session\"}
+\t\tif refreshErr != nil {
+\t\t\tresponse[\"warning\"] = message
+\t\t}
+\t\treturn response, nil
+\t}
+\tmessage := \"Saved locally; remote sync queued.\"
+\tif refreshErr != nil {
+\t\tmessage = \"Saved locally; remote sync queued. Dashboard refresh will retry automatically.\"
+\t}
+\tif persistErr := a.recordCalendarWritebackMutation(result.Source, result.Pair, result.Collection, result.FinalDelete); persistErr != nil {
+\t\tmessage = \"Saved locally, but Dash-Go could not update its durable private-calendar sync authorization. Remote sync is paused for safety; review the calendar before retrying.\"
+\t\tservice.Record(result.Source, \"attention\", message)
+\t\ta.recordAction(\"calendars\", action, \"warning\", message, map[string]any{\"source\": result.Source, \"uid\": result.UID})
+\t\treturn map[string]any{\"ok\": true, \"source\": result.Source, \"uid\": result.UID, \"action\": result.Action, \"sync\": \"attention\", \"warning\": message}, nil
+\t}
+\tservice.Record(result.Source, \"saved\", message)
+\ta.queueCalendarWritebackSync(result.Source, result.Pair, true)
+\tseverity := \"success\"
+\tif refreshErr != nil {
+\t\tseverity = \"warning\"
+\t}
+\ta.recordAction(\"calendars\", action, severity, message, map[string]any{\"source\": result.Source, \"uid\": result.UID})
+\tresponse := map[string]any{\"ok\": true, \"source\": result.Source, \"uid\": result.UID, \"action\": result.Action, \"sync\": \"queued\"}
+\tif refreshErr != nil {
+\t\tresponse[\"warning\"] = message
+\t}
+\treturn response, nil
+""",
+    )
+
+    maps_facade = cmd / "maps_facade.go"
+    replace_once(
+        maps_facade,
+        """func (a *app) eventMapLookup(query string) map[string]any { return a.mapsService().EventLookup(query) }
+""",
+        """func (a *app) eventMapLookup(query string) map[string]any {
+\tif a.showcaseMode() {
+\t\treturn a.showcaseEventMapLookup(query)
+\t}
+\treturn a.mapsService().EventLookup(query)
+}
+""",
+    )
+    replace_once(
+        maps_facade,
+        """func (a *app) geocode(query string) map[string]any        { return a.mapsService().Geocode(query) }
+""",
+        """func (a *app) geocode(query string) map[string]any { return a.mapsService().Geocode(query) }
+""",
+    )
+
+    calendar_writeback_js = app / "ui/js/calendar-writeback.js"
+    replace_once(
+        calendar_writeback_js,
+        """    root.appendChild(el(\"div\",\"calendar-writeback-note\",\"Dashboard edits save locally first. Remote calendar sync follows.\"));
+""",
+        """    root.appendChild(el(\"div\",\"calendar-writeback-note\",window.DASHGO_SHOWCASE?\"Studio edits are saved only for this session and reset when Studio closes.\":\"Dashboard edits save locally first. Remote calendar sync follows.\"));
+""",
+    )
+
     write(cmd / "showcase_mode.go", r'''
 package main
 
@@ -404,6 +524,21 @@ func (a *app) showcaseMode() bool {
 	// boolean flag while preserving the explicit private data root.
 	return strings.TrimSpace(os.Getenv("DASHGO_SHOWCASE")) == "1" ||
 		strings.TrimSpace(os.Getenv("DASHGO_SHOWCASE_DATA_ROOT")) != ""
+}
+
+// showcaseWritableCalendarSource defines the only calendars whose event editor
+// may mutate data in Studio. They are private per-session vdir collections,
+// not imported providers or generated Dash-Go-owned feeds.
+func (a *app) showcaseWritableCalendarSource(source string) bool {
+	if !a.showcaseMode() {
+		return false
+	}
+	switch strings.TrimSpace(source) {
+	case "calendars/family.green.ics", "calendars/home.amber.ics", "calendars/plans.violet.ics":
+		return true
+	default:
+		return false
+	}
 }
 
 // showcaseStaticRelativePath normalizes an HTTP URL path, not an operating
@@ -592,6 +727,68 @@ func (a *app) showcaseRestrictedGet(path string) string {
 	}
 }
 
+// showcaseEventMapLookup provides deterministic coordinates for Studio's
+// curated public venue catalog. The image route can still use Dash-Go's normal
+// cached/fallback renderer, but the lookup itself never needs a network
+// geocoder and never searches the operator's personal locations.
+func (a *app) showcaseEventMapLookup(query string) map[string]any {
+	needle := strings.ToLower(strings.TrimSpace(query))
+	if needle == "" {
+		return map[string]any{"ok": false, "error": "location required"}
+	}
+	type venue struct {
+		Needle, Label string
+		Lat, Lon      float64
+	}
+	venues := []venue{
+		{"chelsea market", "Chelsea Market, New York, NY", 40.7424, -74.0061},
+		{"new york public library", "New York Public Library, New York, NY", 40.7536, -73.9822},
+		{"riverside park", "Riverside Park, New York, NY", 40.7870, -73.9773},
+		{"american museum of natural history", "American Museum of Natural History, New York, NY", 40.7813, -73.9735},
+		{"food bank for new york city", "Food Bank For New York City, New York, NY", 40.7051, -74.0116},
+		{"whole foods market", "Whole Foods Market, Chicago, IL", 41.8676, -87.6408},
+		{"harold washington library", "Harold Washington Library Center, Chicago, IL", 41.8761, -87.6285},
+		{"millennium park", "Millennium Park, Chicago, IL", 41.8826, -87.6226},
+		{"chicago children's museum", "Chicago Children's Museum, Chicago, IL", 41.8917, -87.6089},
+		{"greater chicago food depository", "Greater Chicago Food Depository, Chicago, IL", 41.8147, -87.7282},
+		{"ui health dental", "UI Health Dental Center, Chicago, IL", 41.8692, -87.6693},
+		{"king soopers", "King Soopers, Denver, CO", 39.7467, -104.9969},
+		{"denver central library", "Denver Central Library, Denver, CO", 39.7375, -104.9896},
+		{"denver museum of nature", "Denver Museum of Nature & Science, Denver, CO", 39.7475, -104.9420},
+		{"food bank of the rockies", "Food Bank of the Rockies, Denver, CO", 39.7790, -104.8620},
+		{"grand central market", "Grand Central Market, Los Angeles, CA", 34.0506, -118.2489},
+		{"los angeles central library", "Los Angeles Central Library, Los Angeles, CA", 34.0505, -118.2551},
+		{"california science center", "California Science Center, Los Angeles, CA", 34.0158, -118.2866},
+		{"los angeles regional food bank", "Los Angeles Regional Food Bank, Los Angeles, CA", 34.0074, -118.2290},
+		{"new sagaya city market", "New Sagaya City Market, Anchorage, AK", 61.2096, -149.9006},
+		{"z. j. loussac library", "Z. J. Loussac Library, Anchorage, AK", 61.1879, -149.8138},
+		{"anchorage museum", "Anchorage Museum, Anchorage, AK", 61.2181, -149.8858},
+		{"food bank of alaska", "Food Bank of Alaska, Anchorage, AK", 61.1951, -149.8402},
+		{"foodland farms", "Foodland Farms Ala Moana, Honolulu, HI", 21.2911, -157.8447},
+		{"hawaii state library", "Hawaii State Library, Honolulu, HI", 21.3076, -157.8587},
+		{"honolulu museum of art", "Honolulu Museum of Art, Honolulu, HI", 21.3028, -157.8486},
+		{"hawaii foodbank", "Hawaii Foodbank, Honolulu, HI", 21.3330, -157.9014},
+	}
+	for _, venue := range venues {
+		if strings.Contains(needle, venue.Needle) {
+			return map[string]any{"ok": true, "lat": venue.Lat, "lon": venue.Lon, "label": venue.Label, "queryUsed": query, "geocoder": "showcase-venue-catalog", "cached": true, "defaultZoom": 15, "defaultStyle": "standard"}
+		}
+	}
+	for _, fallback := range []venue{
+		{"new york", "New York, NY — Studio Preview", 40.7128, -74.0060},
+		{"chicago", "Chicago, IL — Studio Preview", 41.8781, -87.6298},
+		{"denver", "Denver, CO — Studio Preview", 39.7392, -104.9903},
+		{"los angeles", "Los Angeles, CA — Studio Preview", 34.0522, -118.2437},
+		{"anchorage", "Anchorage, AK — Studio Preview", 61.2181, -149.9003},
+		{"honolulu", "Honolulu, HI — Studio Preview", 21.3069, -157.8583},
+	} {
+		if strings.Contains(needle, fallback.Needle) {
+			return map[string]any{"ok": true, "lat": fallback.Lat, "lon": fallback.Lon, "label": fallback.Label, "queryUsed": query, "geocoder": "showcase-city-catalog", "cached": true, "defaultZoom": 13, "defaultStyle": "standard"}
+		}
+	}
+	return map[string]any{"ok": false, "error": "This Studio location is not in the curated public venue catalog.", "queryUsed": query}
+}
+
 func (a *app) showcaseGeocode(query string) map[string]any {
 	needle := strings.ToLower(strings.TrimSpace(query))
 	type place struct {
@@ -667,6 +864,33 @@ func TestShowcaseStaticDataPathAllowsEverySeededCalendar(t *testing.T) {
 	}
 	if _, ok := a.showcaseStaticDataPath("calendars/unknown.ics"); ok {
 		t.Fatal("unknown calendar path was unexpectedly allowed")
+	}
+}
+
+func TestShowcaseOnlyAllowsItsThreeSessionWritableCalendars(t *testing.T) {
+	t.Setenv("DASHGO_SHOWCASE", "1")
+	a := &app{}
+	for _, source := range []string{"calendars/family.green.ics", "calendars/home.amber.ics", "calendars/plans.violet.ics"} {
+		if !a.showcaseWritableCalendarSource(source) {
+			t.Fatalf("expected Studio session-write permission for %s", source)
+		}
+	}
+	for _, source := range []string{"calendars/school.blue.ics", "calendars/chore-wheel.ics", "calendars/routines.ics", "calendars/maintenance.ics", "calendars/unknown.ics"} {
+		if a.showcaseWritableCalendarSource(source) {
+			t.Fatalf("unexpected Studio session-write permission for %s", source)
+		}
+	}
+}
+
+func TestShowcaseEventMapLookupUsesCuratedVenueCatalog(t *testing.T) {
+	t.Setenv("DASHGO_SHOWCASE", "1")
+	a := &app{}
+	lookup := a.showcaseEventMapLookup("Whole Foods Market, 1101 S Canal St, Chicago, IL 60607")
+	if lookup["ok"] != true || lookup["geocoder"] != "showcase-venue-catalog" || lookup["lat"] == nil || lookup["lon"] == nil {
+		t.Fatalf("unexpected Studio map lookup: %#v", lookup)
+	}
+	if fallback := a.showcaseEventMapLookup("Unknown private address"); fallback["ok"] == true {
+		t.Fatalf("unknown non-catalog address unexpectedly resolved: %#v", fallback)
 	}
 }
 ''')

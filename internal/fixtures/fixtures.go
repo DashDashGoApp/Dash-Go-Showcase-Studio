@@ -154,22 +154,10 @@ func SeedForLocation(appRoot, home, scenarioID, locationID string, now time.Time
 	if err := seedSchedules(config, today); err != nil {
 		return err
 	}
-	if err := writeCalendar(filepath.Join(calendarDir, "showcase-studio.ics"), scenario.ID, today, now.Location(), profile); err != nil {
-		return err
-	}
-	// The dashboard browser discovers local calendars through this manifest before
-	// it requests the ICS file. Studio packages intentionally exclude mutable
-	// runtime data, so seed the manifest with the fixture rather than relying on
-	// the appliance-side calendar job to create it later.
-	if err := writeJSON(filepath.Join(calendarDir, "calendars.json"), []any{
-		map[string]any{
-			"url":     "calendars/showcase-studio.ics",
-			"name":    "Showcase Studio",
-			"color":   "#7fd6a8",
-			"enabled": true,
-			"tag":     "showcase",
-		},
-	}, 0644); err != nil {
+	// Studio intentionally ships several independent local calendars rather than
+	// placing every event in one catch-all feed. This keeps the calendar chooser,
+	// colors, and visibility controls representative of a real household setup.
+	if err := seedCalendars(calendarDir, scenario.ID, today, now.Location(), profile); err != nil {
 		return err
 	}
 	if err := writeJSON(filepath.Join(config, "chalkboard.json"), map[string]any{"version": 1, "strokes": []any{}}, 0644); err != nil {
@@ -348,35 +336,129 @@ func seedSchedules(config string, today time.Time) error {
 	return writeJSON(filepath.Join(config, "household-schedules.json"), schedules, 0644)
 }
 
-func writeCalendar(path, scenario string, today time.Time, loc *time.Location, profile LocationProfile) error {
-	lines := []string{"BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Dash-Go Showcase Studio//EN", "CALSCALE:GREGORIAN", "X-WR-CALNAME:Showcase Studio"}
-	addAllDay := func(uid, title string, start time.Time) {
-		lines = append(lines, "BEGIN:VEVENT", "UID:"+uid, "DTSTAMP:"+icsStamp(today), "DTSTART;VALUE=DATE:"+icsDate(start), "SUMMARY:"+icsText(title), "END:VEVENT")
-	}
-	addTimed := func(uid, title string, start, end time.Time, location, desc string) {
-		lines = append(lines, "BEGIN:VEVENT", "UID:"+uid, "DTSTAMP:"+icsStamp(today), "DTSTART:"+icsStamp(start), "DTEND:"+icsStamp(end), "SUMMARY:"+icsText(title))
-		if location != "" {
-			lines = append(lines, "LOCATION:"+icsText(location))
+type showcaseCalendarFixture struct {
+	File   string
+	Name   string
+	Color  string
+	Events []showcaseCalendarEvent
+}
+
+type showcaseCalendarEvent struct {
+	UID         string
+	Title       string
+	Start       time.Time
+	End         time.Time
+	AllDay      bool
+	Location    string
+	Description string
+}
+
+func seedCalendars(calendarDir, scenario string, today time.Time, loc *time.Location, profile LocationProfile) error {
+	fixtures := showcaseCalendars(scenario, today, loc, profile)
+	manifest := make([]any, 0, len(fixtures))
+	for _, fixture := range fixtures {
+		if err := writeCalendar(filepath.Join(calendarDir, fixture.File), fixture.Name, today, fixture.Events); err != nil {
+			return err
 		}
-		if desc != "" {
-			lines = append(lines, "DESCRIPTION:"+icsText(desc))
-		}
-		lines = append(lines, "END:VEVENT")
+		manifest = append(manifest, map[string]any{
+			"url":     "calendars/" + fixture.File,
+			"name":    fixture.Name,
+			"color":   fixture.Color,
+			"enabled": true,
+			"tag":     "showcase",
+		})
 	}
-	addAllDay("showcase-birthday", "Avery’s birthday", today.AddDate(0, 0, 5))
-	addAllDay("showcase-trip", "Family road trip", today.AddDate(0, 0, 12))
+	// The dashboard browser discovers local calendars through this manifest before
+	// it requests their ICS files. Studio packages intentionally exclude mutable
+	// runtime data, so seed the full fixture catalog instead of relying on the
+	// appliance-side calendar job to create it later.
+	return writeJSON(filepath.Join(calendarDir, "calendars.json"), manifest, 0644)
+}
+
+func showcaseCalendars(scenario string, today time.Time, loc *time.Location, profile LocationProfile) []showcaseCalendarFixture {
 	base := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, loc)
-	addTimed("showcase-breakfast", "Breakfast together", base.Add(7*time.Hour+30*time.Minute), base.Add(8*time.Hour+15*time.Minute), "Kitchen", "A relaxed start to the day.")
-	addTimed("showcase-school", "School showcase", base.Add(8*time.Hour+30*time.Minute), base.Add(9*time.Hour+30*time.Minute), profile.Venue, "Bring the blue folder.")
-	addTimed("showcase-dinner", "Dinner reservation", base.Add(18*time.Hour), base.Add(19*time.Hour+30*time.Minute), profile.City+" dinner spot", "A fictional city-shaped location supports the map preview path.")
+	fixtures := []showcaseCalendarFixture{
+		{
+			File:  "family.green.ics",
+			Name:  "Family",
+			Color: "#8fc4a6",
+			Events: []showcaseCalendarEvent{
+				allDayShowcaseEvent("family-birthday", "Avery’s birthday", today.AddDate(0, 0, 5)),
+				allDayShowcaseEvent("family-trip", "Family road trip", today.AddDate(0, 0, 12)),
+				timedShowcaseEvent("family-breakfast", "Breakfast together", base.Add(7*time.Hour+30*time.Minute), base.Add(8*time.Hour+15*time.Minute), "Kitchen", "A relaxed start to the day."),
+				timedShowcaseEvent("family-dinner", "Dinner reservation", base.Add(18*time.Hour), base.Add(19*time.Hour+30*time.Minute), profile.City+" dinner spot", "A fictional city-shaped location supports the map preview path."),
+			},
+		},
+		{
+			File:  "school.blue.ics",
+			Name:  "School",
+			Color: "#8bb4d4",
+			Events: []showcaseCalendarEvent{
+				timedShowcaseEvent("school-showcase", "School showcase", base.Add(8*time.Hour+30*time.Minute), base.Add(9*time.Hour+30*time.Minute), profile.Venue, "Bring the blue folder."),
+				timedShowcaseEvent("school-club", "Library club", base.Add(15*time.Hour+30*time.Minute), base.Add(16*time.Hour+30*time.Minute), profile.Venue, "A low-key after-school activity."),
+				allDayShowcaseEvent("school-conference", "Family-teacher conference", today.AddDate(0, 0, 9)),
+			},
+		},
+		{
+			File:  "home.amber.ics",
+			Name:  "Home",
+			Color: "#cda76a",
+			Events: []showcaseCalendarEvent{
+				allDayShowcaseEvent("home-trash", "Trash pickup", today.AddDate(0, 0, 1)),
+				allDayShowcaseEvent("home-filter", "Replace HVAC filter", today.AddDate(0, 0, 2)),
+				timedShowcaseEvent("home-prep", "Meal prep", base.Add(16*time.Hour), base.Add(17*time.Hour), "Kitchen", "Set out ingredients for tomorrow."),
+			},
+		},
+		{
+			File:  "plans.violet.ics",
+			Name:  "Plans",
+			Color: "#9a8fb0",
+			Events: []showcaseCalendarEvent{
+				timedShowcaseEvent("plans-morning", "Morning ready", base.Add(7*time.Hour+15*time.Minute), base.Add(7*time.Hour+30*time.Minute), "Home", "A calm before-school checklist."),
+				timedShowcaseEvent("plans-evening", "Evening reset", base.Add(20*time.Hour), base.Add(20*time.Hour+30*time.Minute), "Home", "Close the day together."),
+				allDayShowcaseEvent("plans-weekend", "Weekend plan", today.AddDate(0, 0, 3)),
+			},
+		},
+	}
 	if scenario == "busy-calendar" || scenario == "capture-gallery" {
+		plans := &fixtures[3]
 		for i := 0; i < 7; i++ {
 			start := base.Add(time.Duration(9+i) * time.Hour)
-			addTimed(fmt.Sprintf("showcase-busy-%d", i), fmt.Sprintf("Planning block %d", i+1), start, start.Add(75*time.Minute), profile.City+" planning room", "Dense calendar fixture.")
+			plans.Events = append(plans.Events, timedShowcaseEvent(fmt.Sprintf("plans-busy-%d", i), fmt.Sprintf("Planning block %d", i+1), start, start.Add(75*time.Minute), profile.City+" planning room", "Dense calendar fixture."))
 		}
 	}
 	if scenario == "family-flow" {
-		addTimed("showcase-family", "Family meeting", base.Add(19*time.Hour+45*time.Minute), base.Add(20*time.Hour+20*time.Minute), profile.Venue, "Review chores, routines, and weekend plans.")
+		family := &fixtures[0]
+		family.Events = append(family.Events, timedShowcaseEvent("family-meeting", "Family meeting", base.Add(19*time.Hour+45*time.Minute), base.Add(20*time.Hour+20*time.Minute), profile.Venue, "Review chores, routines, and weekend plans."))
+	}
+	return fixtures
+}
+
+func allDayShowcaseEvent(uid, title string, start time.Time) showcaseCalendarEvent {
+	return showcaseCalendarEvent{UID: uid, Title: title, Start: start, AllDay: true}
+}
+
+func timedShowcaseEvent(uid, title string, start, end time.Time, location, description string) showcaseCalendarEvent {
+	return showcaseCalendarEvent{UID: uid, Title: title, Start: start, End: end, Location: location, Description: description}
+}
+
+func writeCalendar(path, calendarName string, today time.Time, events []showcaseCalendarEvent) error {
+	lines := []string{"BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Dash-Go Showcase Studio//EN", "CALSCALE:GREGORIAN", "X-WR-CALNAME:" + icsText(calendarName)}
+	for _, event := range events {
+		lines = append(lines, "BEGIN:VEVENT", "UID:"+event.UID, "DTSTAMP:"+icsStamp(today))
+		if event.AllDay {
+			lines = append(lines, "DTSTART;VALUE=DATE:"+icsDate(event.Start))
+		} else {
+			lines = append(lines, "DTSTART:"+icsStamp(event.Start), "DTEND:"+icsStamp(event.End))
+		}
+		lines = append(lines, "SUMMARY:"+icsText(event.Title))
+		if event.Location != "" {
+			lines = append(lines, "LOCATION:"+icsText(event.Location))
+		}
+		if event.Description != "" {
+			lines = append(lines, "DESCRIPTION:"+icsText(event.Description))
+		}
+		lines = append(lines, "END:VEVENT")
 	}
 	lines = append(lines, "END:VCALENDAR", "")
 	return writeText(path, strings.Join(lines, "\r\n"), 0644)

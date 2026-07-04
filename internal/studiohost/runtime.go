@@ -20,9 +20,10 @@ import (
 )
 
 type runningRuntime struct {
-	cmd  *exec.Cmd
-	url  string
-	done <-chan struct{}
+	cmd                     *exec.Cmd
+	url                     string
+	done                    <-chan struct{}
+	retainScenarioAfterStop bool
 }
 
 func (a *App) prepareScenario(scenarioID string) error {
@@ -156,9 +157,21 @@ func (a *App) stopRuntime(runtime *runningRuntime) {
 		a.runtime = nil
 	}
 	a.mu.Unlock()
-	if err := a.discardSessionScenario(); err != nil {
+	if err := a.cleanupScenarioAfterRuntimeStop(runtime); err != nil {
 		fmt.Fprintf(os.Stderr, "Showcase session cleanup warning: %v\n", err)
 	}
+}
+
+// cleanupScenarioAfterRuntimeStop discards ordinary Studio session data as soon
+// as its local runtime stops. The package-only self-test marks its runtime for
+// retention so the packaging smoke can inspect the private scenario and prove
+// that the explicit purge path removes it. The retained state stays below the
+// caller-supplied private state root and is never reused by a later Studio run.
+func (a *App) cleanupScenarioAfterRuntimeStop(runtime *runningRuntime) error {
+	if runtime != nil && runtime.retainScenarioAfterStop {
+		return nil
+	}
+	return a.discardSessionScenario()
 }
 
 // discardSessionScenario removes the only writable Studio data after its local

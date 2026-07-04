@@ -199,3 +199,30 @@ func TestDiscardSessionScenarioRemovesOnlySessionData(t *testing.T) {
 		t.Fatalf("discardSessionScenario touched outside state: %v", err)
 	}
 }
+
+func TestCleanupScenarioAfterRuntimeStopRetainsOnlySelfTestState(t *testing.T) {
+	root := t.TempDir()
+	scenario := filepath.Join(root, "scenario")
+	marker := filepath.Join(scenario, "SHOWCASE_RUNTIME.json")
+	if err := os.MkdirAll(filepath.Join(scenario, "data"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(marker, []byte(`{"scenario":"everyday-household"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &App{paths: paths{scenarioRoot: scenario}}
+	if err := a.cleanupScenarioAfterRuntimeStop(&runningRuntime{retainScenarioAfterStop: true}); err != nil {
+		t.Fatalf("self-test retention cleanup returned error: %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("self-test retention removed private scenario state: %v", err)
+	}
+
+	if err := a.cleanupScenarioAfterRuntimeStop(&runningRuntime{}); err != nil {
+		t.Fatalf("normal session cleanup returned error: %v", err)
+	}
+	if _, err := os.Stat(scenario); !os.IsNotExist(err) {
+		t.Fatalf("normal session cleanup left scenario state behind: %v", err)
+	}
+}

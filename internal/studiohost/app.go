@@ -197,6 +197,11 @@ func (a *App) selfTest() error {
 		return err
 	}
 
+	// The package smoke inspects this private scenario after self-test returns,
+	// then exercises the explicit purge path. Normal Studio sessions retain the
+	// default cleanup behavior and discard their data when the runtime stops.
+	runtime.retainScenarioAfterStop = true
+
 	if a.options.Trace {
 		fmt.Fprintln(os.Stderr, "TRACE self-test: completed")
 	}

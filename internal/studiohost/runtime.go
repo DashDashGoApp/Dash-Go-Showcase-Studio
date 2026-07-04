@@ -156,6 +156,19 @@ func (a *App) stopRuntime(runtime *runningRuntime) {
 		a.runtime = nil
 	}
 	a.mu.Unlock()
+	if err := a.discardSessionScenario(); err != nil {
+		fmt.Fprintf(os.Stderr, "Showcase session cleanup warning: %v\n", err)
+	}
+}
+
+// discardSessionScenario removes the only writable Studio data after its local
+// runtime stops. A later launch reseeds a fresh scenario, so edits never cross
+// session boundaries even if a previous process exits unexpectedly.
+func (a *App) discardSessionScenario() error {
+	if err := os.RemoveAll(a.paths.scenarioRoot); err != nil {
+		return fmt.Errorf("discard Studio session data: %w", err)
+	}
+	return nil
 }
 
 func (a *App) stopActiveRuntime() {

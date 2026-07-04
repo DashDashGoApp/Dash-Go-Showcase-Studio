@@ -393,8 +393,9 @@ window.DASHBOARD_LOCAL = {
 
 func seedSchedules(config string, today time.Time) error {
 	trashStart := previousWeekday(today, time.Tuesday)
+	paydayStart := showcasePaydayAnchor(today)
 	schedules := map[string]any{"schema": 1, "paydays": []any{
-		map[string]any{"id": "household-payday", "label": "Household payday", "enabled": true, "kind": "every-weeks", "start": dateText(previousWeekday(today, time.Friday)), "everyWeeks": 2, "adjustment": map[string]any{"mode": "previous-business-day", "weekends": true, "holidayLayers": []string{"civil"}}},
+		map[string]any{"id": "household-payday", "label": "Household payday", "enabled": true, "kind": "every-weeks", "start": dateText(paydayStart), "everyWeeks": 2, "adjustment": map[string]any{"mode": "previous-business-day", "weekends": true, "holidayLayers": []string{"civil"}}},
 		map[string]any{"id": "side-payday", "label": "Side income", "enabled": true, "kind": "monthly-dates", "days": []int{14, 29}, "adjustment": map[string]any{"mode": "none"}},
 	}, "pickups": []any{
 		map[string]any{"id": "trash", "label": "Trash pickup", "enabled": true, "weekday": "Tuesday", "everyWeeks": 1, "start": dateText(trashStart), "adjustment": map[string]any{"mode": "shift-forward", "days": 1}},
@@ -482,9 +483,22 @@ func seedSessionWriteback(config, home string, today time.Time, fixtures []showc
 			"enabled": true, "name": fixture.Name,
 		})
 	}
-	return writeJSON(filepath.Join(config, "calendar-writeback.json"), map[string]any{
+	// calendar-writeback.json is parsed with DisallowUnknownFields by Dash-Go's
+	// writeback registry. Keep this file strictly limited to the registry schema;
+	// Studio-only session metadata lives beside it instead of making the registry
+	// unreadable and silently disabling Add / Manage.
+	if err := writeJSON(filepath.Join(config, "calendar-writeback.json"), map[string]any{
 		"version": 2, "enabled": true, "requirePin": false, "calendars": calendars,
-		"studio": map[string]any{"sessionOnly": true, "resetsOnClose": true},
+	}, 0600); err != nil {
+		return err
+	}
+	return writeJSON(filepath.Join(config, "showcase-session-calendar.json"), map[string]any{
+		"schema": 1, "sessionOnly": true, "resetsOnClose": true,
+		"writableSources": []string{
+			"calendars/family.green.ics",
+			"calendars/home.amber.ics",
+			"calendars/plans.violet.ics",
+		},
 	}, 0600)
 }
 
@@ -496,9 +510,11 @@ func showcaseCalendars(scenario string, today time.Time, loc *time.Location, pro
 	nextSaturday := nextWeekday(base, time.Saturday)
 	nextTuesday := nextWeekday(base, time.Tuesday)
 	firstSunday := nextWeekday(pastStart, time.Sunday)
+	firstMonday := nextWeekday(pastStart, time.Monday)
 	firstTuesday := nextWeekday(pastStart, time.Tuesday)
 	firstWednesday := nextWeekday(pastStart, time.Wednesday)
 	firstThursday := nextWeekday(pastStart, time.Thursday)
+	firstFriday := showcasePaydayAnchor(base)
 	firstSaturday := nextWeekday(pastStart, time.Saturday)
 
 	family := showcaseCalendarFixture{File: "family.green.ics", Name: "Family", Color: "#8fc4a6", Editable: true, Events: []showcaseCalendarEvent{
@@ -515,7 +531,8 @@ func showcaseCalendars(scenario string, today time.Time, loc *time.Location, pro
 	school := showcaseCalendarFixture{File: "school.blue.ics", Name: "School", Color: "#8bb4d4", Events: schoolCalendarEvents(base, pastStart, futureEnd, profile)}
 
 	home := showcaseCalendarFixture{File: "home.amber.ics", Name: "Home", Color: "#cda76a", Editable: true, Events: []showcaseCalendarEvent{
-		recurringAllDayShowcaseEvent("home-trash", "Trash pickup", firstTuesday, "Set bins out after dinner; the household schedule shifts pickup only when an observed holiday requires it.", "FREQ=WEEKLY;BYDAY=TU;COUNT=38"),
+		recurringShowcaseEvent("home-set-out-bins", "Set out trash and recycling", at(firstMonday, 19, 0), at(firstMonday, 19, 15), "Home", "Move the bins to the curb after dinner. Put out the blue recycling bin on the alternating collection weeks shown below.", "FREQ=WEEKLY;BYDAY=MO;COUNT=38"),
+		recurringAllDayShowcaseEvent("home-trash", "Trash pickup", firstTuesday, "Bins are collected Tuesday morning. Keep the curb clear and bring the empty bin back in after work or school.", "FREQ=WEEKLY;BYDAY=TU;COUNT=38"),
 		recurringAllDayShowcaseEvent("home-recycling", "Recycling pickup", firstTuesday, "Flatten cardboard, rinse containers, and set the blue bin out after dinner for Tuesday collection.", "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU;COUNT=20"),
 		recurringShowcaseEvent("home-grocery", "Grocery pickup", at(firstThursday, 17, 15), at(firstThursday, 17, 45), profile.Market, "Pickup window is 5:15–5:45 PM. Bring two reusable bags; the Grocery list already includes produce, coffee, and a replacement filter.", "FREQ=WEEKLY;BYDAY=TH;COUNT=34"),
 		recurringShowcaseEvent("home-meal-prep", "Meal prep", at(firstSunday, 15, 0), at(firstSunday, 16, 0), "Home", "Wash produce, portion one lunch item, and thaw the first dinner before the Sunday reset is complete.", "FREQ=WEEKLY;BYDAY=SU;COUNT=36"),
@@ -526,6 +543,7 @@ func showcaseCalendars(scenario string, today time.Time, loc *time.Location, pro
 	market := recurringShowcaseEvent("plans-market", "Saturday farmers market", at(firstSaturday, 9, 0), at(firstSaturday, 10, 15), profile.Market, "Pick up seasonal produce first, then choose one treat for the weekend. Bring the tote from the entry closet.", "FREQ=WEEKLY;BYDAY=SA;COUNT=36")
 	market.ExDates = []time.Time{at(nextSaturday.AddDate(0, 0, 14), 9, 0)}
 	plans := showcaseCalendarFixture{File: "plans.violet.ics", Name: "Plans", Color: "#9a8fb0", Editable: true, Events: []showcaseCalendarEvent{
+		recurringAllDayShowcaseEvent("plans-payday", "Payday", firstFriday, "Direct deposit posts today. Review upcoming auto-payments, move the planned savings amount, and confirm the grocery and weekend budget before the afternoon.", "FREQ=WEEKLY;INTERVAL=2;BYDAY=FR;COUNT=24"),
 		market,
 		recurringShowcaseEvent("plans-library", "Library pickup", at(firstThursday, 16, 30), at(firstThursday, 17, 0), profile.Library, "Return the blue bag before selecting new books. Check the holds shelf for the reading-club title.", "FREQ=WEEKLY;BYDAY=TH;COUNT=34"),
 		timedShowcaseEvent("plans-volunteer", "Food pantry volunteer shift", at(nextWeekday(base.AddDate(0, 0, 10), time.Saturday), 9, 30), at(nextWeekday(base.AddDate(0, 0, 10), time.Saturday), 12, 0), profile.VolunteerSite, "Wear closed-toe shoes and arrive ten minutes early for check-in. Bring a reusable water bottle.", ""),
@@ -715,6 +733,13 @@ func nextWeekday(value time.Time, wanted time.Weekday) time.Time {
 		value = value.AddDate(0, 0, 1)
 	}
 	return value
+}
+
+// showcasePaydayAnchor keeps the visible Plans payday series and the Household
+// Schedules payday rule on the same alternating-Friday cadence. Starting from
+// the rolling fixture window guarantees useful history and future occurrences.
+func showcasePaydayAnchor(today time.Time) time.Time {
+	return nextWeekday(startOfWeek(day(today).AddDate(0, 0, -showcasePastDays)), time.Friday)
 }
 
 func writeJSON(path string, value any, perm os.FileMode) error {

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
@@ -166,5 +168,34 @@ func TestAssertClientVisibleScenarioDataRejectsFallbackContent(t *testing.T) {
 
 	if err := assertClientVisibleScenarioDataWithRetry(server.URL, 1, 0, nil); err == nil {
 		t.Fatal("assertClientVisibleScenarioData accepted a missing fixture marker")
+	}
+}
+
+func TestDiscardSessionScenarioRemovesOnlySessionData(t *testing.T) {
+	root := t.TempDir()
+	scenario := filepath.Join(root, "scenario")
+	outside := filepath.Join(root, "outside", "keep.txt")
+	if err := os.MkdirAll(filepath.Dir(outside), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(scenario, "config"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scenario, "config", "calendar-writeback.json"), []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(outside, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &App{paths: paths{scenarioRoot: scenario}}
+	if err := a.discardSessionScenario(); err != nil {
+		t.Fatalf("discardSessionScenario returned error: %v", err)
+	}
+	if _, err := os.Stat(scenario); !os.IsNotExist(err) {
+		t.Fatalf("scenario root remains after discard: %v", err)
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatalf("discardSessionScenario touched outside state: %v", err)
 	}
 }

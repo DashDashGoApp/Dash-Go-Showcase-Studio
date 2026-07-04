@@ -412,7 +412,12 @@ def showcase_tour_guard_view_contract(ctx: Context, app: Path) -> None:
     app_sources = js_manifest.get("bundles", {}).get("app")
     if not isinstance(app_sources, list):
         raise BuildFailure(phase_name, "Manifest", "staged browser manifest has no app bundle list")
-    expected_tail = ["family-board-footer.js", "showcase-tour.js", "showcase-view.js"]
+    expected_tail = [
+        "family-board-footer.js",
+        "showcase-tour.js",
+        "showcase-view.js",
+        "showcase-calendar-sandbox.js",
+    ]
     if app_sources[-len(expected_tail):] != expected_tail:
         raise BuildFailure(phase_name, "Manifest", f"staged app bundle tail must be {expected_tail}, found {app_sources[-len(expected_tail):]}")
     css_manifest = json.loads((app / "ui/css/bundle.manifest.json").read_text(encoding="utf-8"))

@@ -33,16 +33,28 @@ def assert_stage_packager_syntax_and_r7_phase(root: Path) -> None:
         raise CheckError(f"ci/stage-package.py has invalid Python syntax: {exc.msg} (line {exc.lineno})") from exc
 
     lines = text.splitlines()
-    base = [index for index, line in enumerate(lines) if 'run(ctx, "Apply Showcase overlay",' in line]
-    r7 = [index for index, line in enumerate(lines) if 'run(ctx, "Apply Showcase r7 calendar and presentation overlay",' in line]
-    if len(base) != 1 or len(r7) != 1:
-        raise CheckError("ci/stage-package.py must contain exactly one base and one r7 Showcase overlay invocation")
-    if r7[0] != base[0] + 1:
-        raise CheckError("ci/stage-package.py must invoke the r7 overlay immediately after the base Showcase overlay")
-    base_indent = len(lines[base[0]]) - len(lines[base[0]].lstrip(" \t"))
-    r7_indent = len(lines[r7[0]]) - len(lines[r7[0]].lstrip(" \t"))
-    if not base_indent or base_indent != r7_indent:
-        raise CheckError("ci/stage-package.py r7 overlay invocation must share the base overlay indentation inside phase 3")
+    bridge = [index for index, line in enumerate(lines) if '"Apply Dash-Go Showcase compatibility profile"' in line]
+    if len(bridge) != 1:
+        raise CheckError("ci/stage-package.py must contain exactly one central Showcase compatibility invocation")
+    bridge_indent = len(lines[bridge[0]]) - len(lines[bridge[0]].lstrip(" \t"))
+    if not bridge_indent:
+        raise CheckError("ci/stage-package.py central Showcase compatibility invocation must remain nested in phase 3")
+    for retired in (
+        'run(ctx, "Apply Showcase overlay",',
+        'run(ctx, "Apply Showcase r7 calendar and presentation overlay",',
+    ):
+        if retired in text:
+            raise CheckError("ci/stage-package.py still invokes a legacy adapter directly")
+    for token in (
+        "tools/apply_dashgo_compatibility.py",
+        "showcase-compatibility-report.json",
+        "--source-archive",
+        "--source-sha256",
+        "--gofmt",
+        "--report",
+    ):
+        if token not in text:
+            raise CheckError(f"ci/stage-package.py central Showcase compatibility invocation is missing: {token}")
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -84,7 +96,7 @@ def main() -> int:
         print("NOTE: ignored local Python cache artifacts (not part of source handoff or package): " + ", ".join(sorted(caches)[:8]))
     for relative in (
         "go.mod", "cmd/dash-go-showcase-studio/main.go", "internal/studiohost/runtime.go", "internal/studiohost/app.go",
-        "internal/fixtures/fixtures.go", "tools/patch_dashgo_engine.py", "tools/patch_dashgo_r7.py", "tools/generate_dashgo_assets.py",
+        "internal/fixtures/fixtures.go", "tools/patch_dashgo_engine.py", "tools/patch_dashgo_r7.py", "tools/apply_dashgo_compatibility.py", "tools/dashgo_compatibility.json", "tools/test_dashgo_compatibility.py", "tools/generate_dashgo_assets.py",
         "tools/refresh_dashgo_baseline.py", "tools/prepare_dashgo_release.py",
         "tools/validate_studio_prepublication_bridge.py", "tools/test_prepare_dashgo_release_prepublication.py",
         ".github/workflows/studio-prepublish-candidate.yml", "PREPUBLICATION_CANDIDATE_INTAKE.md",
@@ -235,6 +247,47 @@ def main() -> int:
             raise CheckError(f"Staged Dash-Go Studio contract still exposes retired live preset: {retired}")
     if "const location=" in patcher or re.search(r"(?<![\w.])location\.(?:reload|assign)\(", patcher):
         raise CheckError("Staged Dash-Go tour must not shadow window.location")
+    compatibility_matrix = json.loads((root / "tools/dashgo_compatibility.json").read_text(encoding="utf-8"))
+    if compatibility_matrix.get("schema") != 2:
+        raise CheckError("Showcase compatibility matrix schema must be 2")
+    profiles = compatibility_matrix.get("profiles")
+    if not isinstance(profiles, list) or len(profiles) != 1:
+        raise CheckError("Showcase compatibility matrix must define exactly one legacy profile")
+    profile = profiles[0]
+    if not isinstance(profile, dict) or profile.get("id") != "legacy-bridge-v1":
+        raise CheckError("Showcase compatibility matrix has an unexpected legacy profile")
+    if "sources" in profile:
+        raise CheckError("Showcase compatibility matrix must not retain brittle exact-archive source rules")
+    policy = profile.get("sourcePolicy")
+    if not isinstance(policy, dict):
+        raise CheckError("Showcase compatibility matrix source policy is missing")
+    if policy != {
+        "selection": "adapter-probe",
+        "minimumVersion": "1.5.7",
+        "maximumVersionExclusive": "1.6.0",
+    }:
+        raise CheckError("Showcase compatibility matrix has an unexpected adapter-probe window")
+    checks = profile.get("requiredCandidateChecks")
+    if checks != [
+        "staged-linux-package-and-runtime-self-test",
+        "windows-installer-install-self-test-and-uninstall-smoke",
+    ]:
+        raise CheckError("Showcase compatibility matrix has an unexpected candidate-check contract")
+    bridge = (root / "tools/apply_dashgo_compatibility.py").read_text(encoding="utf-8")
+    for token in (
+        "requiredCandidateChecks",
+        "SHOWCASE COMPATIBILITY ERROR",
+        "source archive SHA-256 mismatch",
+        "adapter-probe",
+        "maximumVersionExclusive",
+        "the adapters themselves are the final",
+    ):
+        if token not in bridge:
+            raise CheckError(f"Showcase compatibility bridge is missing contract token: {token}")
+    for retired in ("add a reviewed exact-hash matrix entry", "sourceHashMode", "manifest-verified"):
+        if retired in bridge:
+            raise CheckError("Showcase compatibility bridge retains a broad or brittle retired selection path")
+
     linux_uninstall = (root / "packaging/linux/dash-go-showcase-studio-uninstall").read_text(encoding="utf-8")
     for token in ("--purge-state", "--purge", "--action purge", "apt-get purge", "id -u", "sudo"):
         if token not in linux_uninstall:

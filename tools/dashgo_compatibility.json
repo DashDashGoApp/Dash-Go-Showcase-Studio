@@ -1,0 +1,37 @@
+{
+  "schema": 2,
+  "profiles": [
+    {
+      "id": "legacy-bridge-v1",
+      "description": "Fail-closed legacy adapter for Dash-Go 1.5.x sources that predate Showcase Contract v1. Archive provenance is verified independently; actual adapter anchors remain the compatibility proof.",
+      "sourcePolicy": {
+        "selection": "adapter-probe",
+        "minimumVersion": "1.5.7",
+        "maximumVersionExclusive": "1.6.0"
+      },
+      "requiredAppPaths": [
+        "cmd/dashboard-control-server/main.go",
+        "cmd/dashboard-control-server/weather_facade.go",
+        "cmd/dashboard-control-server/maps_facade.go",
+        "cmd/dashboard-control-server/calendar_writeback.go",
+        "internal/fileio/fileio.go",
+        "ui/js/calendar-writeback.js"
+      ],
+      "adapters": [
+        {
+          "id": "portable-runtime",
+          "script": "tools/patch_dashgo_engine.py"
+        },
+        {
+          "id": "session-calendars-and-presentation",
+          "script": "tools/patch_dashgo_r7.py",
+          "requiresGofmt": true
+        }
+      ],
+      "requiredCandidateChecks": [
+        "staged-linux-package-and-runtime-self-test",
+        "windows-installer-install-self-test-and-uninstall-smoke"
+      ]
+    }
+  ]
+}

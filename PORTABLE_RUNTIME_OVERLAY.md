@@ -46,3 +46,18 @@ The status check is intentionally a fast green no-op for unrelated pull requests
 Studio always seeds `showcase-manifest.json` with its four disposable editable calendars. When the packaged Dash-Go runtime contains a valid `release/showcase-contract.json`, Studio launches it through `DASHGO_RUNTIME_PROFILE=showcase`, `DASHGO_SHOWCASE_MANIFEST`, and `DASHGO_DATA_ROOT`, then refuses to open until `/api/showcase/status` reports the native contract, rebuilt cache, all four writable calendars, and writeback candidates.
 
 Older packaged Dash-Go releases without that declaration continue through the checked-in legacy bridge. Studio does not guess: a malformed or incomplete native declaration fails closed, while an absent declaration is the explicit legacy-compatibility fallback until the contract-native stage path replaces the overlays.
+
+## Runtime contract matrix (Task 3.1)
+
+`internal/studiohost/dashgo_runtime_contract_matrix.json` makes the remaining
+Studio/Dash-Go boundary explicit. It is the machine-readable inventory for
+native Contract v1 capabilities, activation variables, readiness/status
+expectations, calendar fixtures, browser-visible scenario routes, package
+paths, and legacy-only bridge dependencies.
+
+The immutable beta materializer and Stage selector both validate a present
+`release/showcase-contract.json` against that matrix. A missing native
+capability reports the exact Studio consumer and reason before package work or
+Windows proof begins. The reviewed legacy bridge remains available only when
+the declaration is absent. A malformed or incomplete declaration fails closed;
+it never falls back to overlays.

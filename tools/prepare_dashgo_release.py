@@ -15,6 +15,12 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from showcase_runtime_contract import (
+    RuntimeContractMatrixError,
+    load_runtime_contract_matrix,
+    native_contract_error_message,
+)
+
 sys.dont_write_bytecode = True
 
 DASHGO_REPOSITORY = "DashDashGoApp/Dash-Go"
@@ -24,16 +30,7 @@ MANUAL_PURPOSE = "manual package candidate only"
 STABLE_PURPOSE = "stable release package candidate only"
 DRAFT_PREPUBLICATION_PURPOSE = "draft prepublication package candidate only"
 BETA_NATIVE_PURPOSE = "beta release native contract candidate only"
-NATIVE_SHOWCASE_CONTRACT = "dashgo-showcase/v1"
-NATIVE_SHOWCASE_CAPABILITIES = (
-    "separateDataRoot",
-    "scenarioManifest",
-    "scenarioCalendars",
-    "calendarWritebackAllowlist",
-    "cacheRebuildReport",
-    "statusEndpoint",
-    "staticScenarioAssets",
-)
+STUDIO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseInputError(RuntimeError):
@@ -170,16 +167,13 @@ def resolve_tag_commit(api: str, tag: str) -> str:
 
 
 def validate_native_showcase_contract(payload: object) -> None:
-    if not isinstance(payload, dict):
-        raise ReleaseInputError("Dash-Go Showcase contract must be a JSON object")
-    if payload.get("schema") != 1 or payload.get("contract") != NATIVE_SHOWCASE_CONTRACT:
-        raise ReleaseInputError("Dash-Go Showcase contract is not dashgo-showcase/v1")
-    capabilities = payload.get("capabilities")
-    if not isinstance(capabilities, dict):
-        raise ReleaseInputError("Dash-Go Showcase contract lacks capabilities")
-    for capability in NATIVE_SHOWCASE_CAPABILITIES:
-        if capabilities.get(capability) is not True:
-            raise ReleaseInputError(f"Dash-Go Showcase contract lacks required capability: {capability}")
+    try:
+        matrix = load_runtime_contract_matrix(STUDIO_ROOT)
+    except RuntimeContractMatrixError as exc:
+        raise ReleaseInputError(f"Studio runtime-contract matrix is invalid: {exc}") from exc
+    message = native_contract_error_message(payload, matrix)
+    if message is not None:
+        raise ReleaseInputError(message)
 
 
 def validate_archive(archive: Path, version: str, track: str, *, require_native_contract: bool = False) -> None:

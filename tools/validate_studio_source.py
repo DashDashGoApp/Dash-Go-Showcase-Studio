@@ -21,6 +21,29 @@ def sha256(path: Path) -> str:
             digest.update(chunk)
     return digest.hexdigest()
 
+
+def assert_stage_packager_syntax_and_r7_phase(root: Path) -> None:
+    path = root / "ci/stage-package.py"
+    if not path.is_file():
+        raise CheckError("missing Studio source: ci/stage-package.py")
+    text = path.read_text(encoding="utf-8")
+    try:
+        compile(text, str(path), "exec")
+    except SyntaxError as exc:
+        raise CheckError(f"ci/stage-package.py has invalid Python syntax: {exc.msg} (line {exc.lineno})") from exc
+
+    lines = text.splitlines()
+    base = [index for index, line in enumerate(lines) if 'run(ctx, "Apply Showcase overlay",' in line]
+    r7 = [index for index, line in enumerate(lines) if 'run(ctx, "Apply Showcase r7 calendar and presentation overlay",' in line]
+    if len(base) != 1 or len(r7) != 1:
+        raise CheckError("ci/stage-package.py must contain exactly one base and one r7 Showcase overlay invocation")
+    if r7[0] != base[0] + 1:
+        raise CheckError("ci/stage-package.py must invoke the r7 overlay immediately after the base Showcase overlay")
+    base_indent = len(lines[base[0]]) - len(lines[base[0]].lstrip(" \t"))
+    r7_indent = len(lines[r7[0]]) - len(lines[r7[0]].lstrip(" \t"))
+    if not base_indent or base_indent != r7_indent:
+        raise CheckError("ci/stage-package.py r7 overlay invocation must share the base overlay indentation inside phase 3")
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
@@ -113,6 +136,7 @@ def main() -> int:
     patcher = (root / "tools/patch_dashgo_engine.py").read_text(encoding="utf-8")
     r7_patcher = (root / "tools/patch_dashgo_r7.py").read_text(encoding="utf-8")
     stage_packager = (root / "ci/stage-package.py").read_text(encoding="utf-8")
+    assert_stage_packager_syntax_and_r7_phase(root)
     for token in ("case \"purge\"", "func (a *App) purge() error", "validatePurgeRequest", "requireRuntime := normalized.Action != \"clean\" && normalized.Action != \"purge\""):
         if token not in host_app:
             raise CheckError(f"Studio host is missing guarded full-state purge contract: {token}")

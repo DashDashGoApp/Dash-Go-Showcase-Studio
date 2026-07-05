@@ -873,7 +873,7 @@ def main() -> int:
             app = extract / ctx.dashgo_root / "app"
             need_file(app / "go.mod", "Dash-Go module", "")
             run(ctx, "Apply Showcase overlay", [sys.executable, str(source / "tools/patch_dashgo_engine.py"), "--app", str(app)], cwd=source, timeout=120)
-    run(ctx, "Apply Showcase r7 calendar and presentation overlay", [sys.executable, str(source / "tools/patch_dashgo_r7.py"), "--app", str(app), "--gofmt", str(Path(ctx.go).with_name("gofmt"))], cwd=source, timeout=120)
+            run(ctx, "Apply Showcase r7 calendar and presentation overlay", [sys.executable, str(source / "tools/patch_dashgo_r7.py"), "--app", str(app), "--gofmt", str(Path(ctx.go).with_name("gofmt"))], cwd=source, timeout=120)
             verify_showcase_overlay_formatting(ctx, app)
         with phase(ctx, 4, "Generate and validate browser assets"):
             run(ctx, "Generate Dash-Go browser assets", [sys.executable, str(source / "tools/generate_dashgo_assets.py"), "--app", str(app)], cwd=source, timeout=240)

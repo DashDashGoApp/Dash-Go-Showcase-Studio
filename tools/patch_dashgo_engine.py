@@ -68,8 +68,8 @@ def apply(app: Path) -> None:
     fileio = app / "internal/fileio/fileio.go"
     replace_once(
         fileio,
-        '\t"errors"\n\t"os"\n',
-        '\t"errors"\n\t"os"\n\t"runtime"\n',
+        '\t"errors"\n\t"os"\n\t"path/filepath"\n',
+        '\t"errors"\n\t"os"\n\t"path/filepath"\n\t"runtime"\n',
     )
     replace_once(
         fileio,

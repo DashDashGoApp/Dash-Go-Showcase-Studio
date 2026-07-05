@@ -193,7 +193,7 @@ func (a *App) selfTest() error {
 	if a.options.Trace {
 		fmt.Fprintln(os.Stderr, "TRACE self-test: verify readiness")
 	}
-	if err := a.assertReady(runtime.url); err != nil {
+	if err := a.assertReady(runtime.url, runtime.livenessPath); err != nil {
 		return err
 	}
 

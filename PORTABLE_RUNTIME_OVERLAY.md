@@ -61,3 +61,14 @@ capability reports the exact Studio consumer and reason before package work or
 Windows proof begins. The reviewed legacy bridge remains available only when
 the declaration is absent. A malformed or incomplete declaration fails closed;
 it never falls back to overlays.
+
+## Executable native launch plan (Task 3.2)
+
+The Studio host embeds that same checked-in matrix and derives the native
+launch environment, disposable data-root and manifest paths, readiness/status
+checks, writable-calendar policy, and browser-visible scenario probes from it.
+The matrix's `scenario/data` paths are resolved relative to Studio's private
+state root, never the immutable runtime application root. Before launch,
+Studio requires the resolved data root to be exactly its private scenario data
+path and the seeded manifest to exist. Legacy bridge environment variables and
+legacy-only checks remain in their isolated fallback branch.

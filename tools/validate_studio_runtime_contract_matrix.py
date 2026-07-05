@@ -59,6 +59,7 @@ def main() -> int:
         raise ValidationError("runtime contract matrix has an unexpected required native capability order")
 
     runtime = root / "internal/studiohost/runtime.go"
+    runtime_plan = root / "internal/studiohost/runtime_contract_plan.go"
     matrix_module = root / "tools/showcase_runtime_contract.py"
     materializer = root / "tools/prepare_dashgo_release.py"
     stage = root / "ci/stage-package.py"
@@ -68,16 +69,24 @@ def main() -> int:
 
     require_text(
         runtime,
-        "DASHGO_RUNTIME_PROFILE=showcase",
-        "DASHGO_SHOWCASE_MANIFEST=",
-        "DASHGO_DATA_ROOT=",
-        "/api/ready",
-        "/api/showcase/status",
-        "nativeShowcaseContractAvailable",
-        "nativeContractClientVisibleScenarioData",
+        "nativeShowcaseRuntimePlanAvailable",
+        "nativePlan.launchEnvironment",
+        "nativePlan.clientVisibleScenarioData",
+        "assertNativeShowcaseContractReadyWithPlan",
+        "legacyShowcaseLivenessPath",
         "DASHGO_HOME=",
         "DASHGO_SHOWCASE=1",
         "DASHGO_SHOWCASE_DATA_ROOT=",
+    )
+    require_text(
+        runtime_plan,
+        "//go:embed dashgo_runtime_contract_matrix.json",
+        "loadNativeRuntimeContractPlan",
+        "launchEnvironment",
+        "scenarioPaths",
+        "clientVisibleScenarioData",
+        "writableCalendarRequirements",
+        "runtime-contract data root",
     )
     require_text(
         matrix_module,

@@ -14,159 +14,85 @@ import (
 	"time"
 )
 
-type runtimeContractMatrixTestDocument struct {
-	Schema         int `json:"schema"`
-	NativeContract struct {
-		Schema               int    `json:"schema"`
-		Contract             string `json:"contract"`
-		DeclarationPath      string `json:"declarationPath"`
-		RequiredCapabilities []struct {
-			ID string `json:"id"`
-		} `json:"requiredCapabilities"`
-		Activation struct {
-			RuntimeProfile struct {
-				Environment string `json:"environment"`
-				Value       string `json:"value"`
-			} `json:"runtimeProfile"`
-			ScenarioManifest struct {
-				Environment  string `json:"environment"`
-				RelativePath string `json:"relativePath"`
-			} `json:"scenarioManifest"`
-			DataRoot struct {
-				Environment  string `json:"environment"`
-				RelativePath string `json:"relativePath"`
-			} `json:"dataRoot"`
-		} `json:"activation"`
-		Readiness struct {
-			LivenessPath string `json:"livenessPath"`
-			StatusPath   string `json:"statusPath"`
-			Profile      string `json:"profile"`
-			Cache        struct {
-				Rebuilt                    bool `json:"rebuilt"`
-				MinimumEvents              int  `json:"minimumEvents"`
-				MinimumWritebackCandidates int  `json:"minimumWritebackCandidates"`
-			} `json:"cache"`
-		} `json:"readiness"`
-		Calendars []struct {
-			Source                     string `json:"source"`
-			Mode                       string `json:"mode"`
-			ExpectedEventMarker        string `json:"expectedEventMarker"`
-			MinimumWritebackCandidates int    `json:"minimumWritebackCandidates"`
-		} `json:"calendars"`
-		BrowserRoutes []struct {
-			Path      string `json:"path"`
-			Contains  string `json:"contains"`
-			ParseJSON bool   `json:"parseJSON"`
-		} `json:"browserRoutes"`
-	} `json:"nativeContract"`
-	LegacyBridge struct {
-		BrowserRoutes []struct {
-			Path      string `json:"path"`
-			Contains  string `json:"contains"`
-			ParseJSON bool   `json:"parseJSON"`
-		} `json:"browserRoutes"`
-	} `json:"legacyBridge"`
-}
-
-func loadRuntimeContractMatrixForTest(t *testing.T) runtimeContractMatrixTestDocument {
-	t.Helper()
-	body, err := os.ReadFile("dashgo_runtime_contract_matrix.json")
+func TestEmbeddedNativeRuntimeContractPlanDrivesRuntime(t *testing.T) {
+	plan, err := loadNativeRuntimeContractPlan()
 	if err != nil {
-		t.Fatalf("read runtime contract matrix: %v", err)
+		t.Fatalf("loadNativeRuntimeContractPlan() = %v", err)
 	}
-	var matrix runtimeContractMatrixTestDocument
-	if err := json.Unmarshal(body, &matrix); err != nil {
-		t.Fatalf("decode runtime contract matrix: %v", err)
+	if plan.Contract != supportedNativeShowcaseContract {
+		t.Fatalf("native contract=%q, want %q", plan.Contract, supportedNativeShowcaseContract)
 	}
-	return matrix
+	if plan.DeclarationPath != "release/showcase-contract.json" {
+		t.Fatalf("native declaration path=%q", plan.DeclarationPath)
+	}
+	if plan.Activation.RuntimeProfile.Environment == "" || plan.Activation.RuntimeProfile.Value == "" || plan.Activation.ScenarioManifest.Environment == "" || plan.Activation.DataRoot.Environment == "" {
+		t.Fatalf("embedded native activation is incomplete: %#v", plan.Activation)
+	}
+	if plan.Readiness.LivenessPath == "" || plan.Readiness.StatusPath == "" || plan.Readiness.Profile == "" || !plan.Readiness.Cache.Rebuilt {
+		t.Fatalf("embedded native readiness is incomplete: %#v", plan.Readiness)
+	}
+	if len(plan.RequiredCapabilities) == 0 {
+		t.Fatal("embedded native capability list is empty")
+	}
+	if got, want := len(plan.writableCalendarRequirements()), plan.Readiness.Cache.MinimumWritebackCandidates; got != want {
+		t.Fatalf("embedded writable calendar requirements=%d, readiness cache candidates=%d", got, want)
+	}
+	probes := plan.clientVisibleScenarioData()
+	if len(probes) != len(plan.BrowserRoutes) {
+		t.Fatalf("native probes=%d, matrix browser routes=%d", len(probes), len(plan.BrowserRoutes))
+	}
+	for index, probe := range probes {
+		route := plan.BrowserRoutes[index]
+		if probe.Path != route.Path || probe.Contains != route.Contains || probe.ParseJSON != route.ParseJSON {
+			t.Fatalf("runtime probe[%d]=%#v, matrix route=%#v", index, probe, route)
+		}
+	}
+	if len(legacyClientVisibleScenarioData) != 4 {
+		t.Fatalf("legacy browser probes=%d, want 4 bridge-only probes", len(legacyClientVisibleScenarioData))
+	}
 }
 
-func TestRuntimeContractMatrixMatchesNativeRuntimeAssumptions(t *testing.T) {
-	matrix := loadRuntimeContractMatrixForTest(t)
-	if matrix.Schema != 1 || matrix.NativeContract.Schema != 1 {
-		t.Fatalf("unexpected runtime contract matrix schema: %#v", matrix)
+func TestNativeRuntimeContractPlanDerivesIsolatedLaunchEnvironment(t *testing.T) {
+	plan, err := loadNativeRuntimeContractPlan()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if matrix.NativeContract.Contract != nativeShowcaseContractName {
-		t.Fatalf("native contract=%q, want %q", matrix.NativeContract.Contract, nativeShowcaseContractName)
+	stateRoot := t.TempDir()
+	data := filepath.Join(stateRoot, "scenario", "data")
+	if err := os.MkdirAll(data, 0700); err != nil {
+		t.Fatal(err)
 	}
-	if matrix.NativeContract.DeclarationPath != "release/showcase-contract.json" {
-		t.Fatalf("native declaration path=%q", matrix.NativeContract.DeclarationPath)
+	_, manifest, err := plan.scenarioPaths(stateRoot, data)
+	if err != nil {
+		t.Fatalf("scenarioPaths() = %v", err)
 	}
-	if matrix.NativeContract.Activation.RuntimeProfile.Environment != "DASHGO_RUNTIME_PROFILE" || matrix.NativeContract.Activation.RuntimeProfile.Value != "showcase" {
-		t.Fatalf("unexpected runtime-profile activation: %#v", matrix.NativeContract.Activation.RuntimeProfile)
+	if err := os.WriteFile(manifest, []byte("{}\n"), 0600); err != nil {
+		t.Fatal(err)
 	}
-	if matrix.NativeContract.Activation.ScenarioManifest.Environment != "DASHGO_SHOWCASE_MANIFEST" || matrix.NativeContract.Activation.ScenarioManifest.RelativePath != "scenario/data/showcase-manifest.json" {
-		t.Fatalf("unexpected scenario-manifest activation: %#v", matrix.NativeContract.Activation.ScenarioManifest)
+	environment, err := plan.launchEnvironment(stateRoot, data)
+	if err != nil {
+		t.Fatalf("launchEnvironment() = %v", err)
 	}
-	if matrix.NativeContract.Activation.DataRoot.Environment != "DASHGO_DATA_ROOT" || matrix.NativeContract.Activation.DataRoot.RelativePath != "scenario/data" {
-		t.Fatalf("unexpected data-root activation: %#v", matrix.NativeContract.Activation.DataRoot)
+	got := map[string]string{}
+	for _, entry := range environment {
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			t.Fatalf("invalid environment entry %q", entry)
+		}
+		got[name] = value
 	}
-	if matrix.NativeContract.Readiness.LivenessPath != showcaseLivenessPath || matrix.NativeContract.Readiness.StatusPath != showcaseStatusPath || matrix.NativeContract.Readiness.Profile != "showcase" {
-		t.Fatalf("unexpected native readiness contract: %#v", matrix.NativeContract.Readiness)
+	if got[plan.Activation.RuntimeProfile.Environment] != plan.Activation.RuntimeProfile.Value || got[plan.Activation.ScenarioManifest.Environment] != manifest || got[plan.Activation.DataRoot.Environment] != data {
+		t.Fatalf("native launch environment=%#v", got)
 	}
-	if !matrix.NativeContract.Readiness.Cache.Rebuilt || matrix.NativeContract.Readiness.Cache.MinimumEvents != 1 || matrix.NativeContract.Readiness.Cache.MinimumWritebackCandidates != len(sessionCalendarWritableSources) {
-		t.Fatalf("unexpected native cache readiness contract: %#v", matrix.NativeContract.Readiness.Cache)
+	if _, err := plan.stagedManifestPath(stateRoot, data, filepath.Join(t.TempDir(), "data")); err == nil {
+		t.Fatal("stagedManifestPath accepted a staging directory without the required manifest")
 	}
+}
 
-	if len(matrix.NativeContract.RequiredCapabilities) != len(nativeShowcaseRequiredCapabilities) {
-		t.Fatalf("matrix capabilities=%d, runtime capabilities=%d", len(matrix.NativeContract.RequiredCapabilities), len(nativeShowcaseRequiredCapabilities))
-	}
-	for index, capability := range nativeShowcaseRequiredCapabilities {
-		if got := matrix.NativeContract.RequiredCapabilities[index].ID; got != capability {
-			t.Fatalf("matrix capability[%d]=%q, want %q", index, got, capability)
-		}
-	}
-
-	writable := map[string]struct{}{}
-	calendarRoutes := map[string]string{}
-	for _, calendar := range matrix.NativeContract.Calendars {
-		if calendar.Mode == "writable" {
-			writable[calendar.Source] = struct{}{}
-			calendarRoutes["/"+calendar.Source] = calendar.ExpectedEventMarker
-		}
-	}
-	if len(writable) != len(sessionCalendarWritableSources) {
-		t.Fatalf("matrix writable calendars=%d, runtime writable calendars=%d", len(writable), len(sessionCalendarWritableSources))
-	}
-	for source := range sessionCalendarWritableSources {
-		if _, ok := writable[source]; !ok {
-			t.Fatalf("runtime writable calendar %q is missing from matrix", source)
-		}
-	}
-
-	if len(matrix.NativeContract.BrowserRoutes) != len(nativeContractClientVisibleScenarioData) {
-		t.Fatalf("matrix native browser routes=%d, runtime native browser probes=%d", len(matrix.NativeContract.BrowserRoutes), len(nativeContractClientVisibleScenarioData))
-	}
-	for index, probe := range nativeContractClientVisibleScenarioData {
-		row := matrix.NativeContract.BrowserRoutes[index]
-		if row.Path != probe.Path || row.Contains != probe.Contains || row.ParseJSON != probe.ParseJSON {
-			t.Fatalf("matrix native browser route[%d]=%#v, runtime probe=%#v", index, row, probe)
-		}
-	}
-	allMatrixRoutes := append(append([]struct {
-		Path      string `json:"path"`
-		Contains  string `json:"contains"`
-		ParseJSON bool   `json:"parseJSON"`
-	}{}, matrix.NativeContract.BrowserRoutes...), matrix.LegacyBridge.BrowserRoutes...)
-	if len(allMatrixRoutes) != len(requiredClientVisibleScenarioData) {
-		t.Fatalf("matrix total browser routes=%d, runtime all browser probes=%d", len(allMatrixRoutes), len(requiredClientVisibleScenarioData))
-	}
-	for index, probe := range requiredClientVisibleScenarioData {
-		row := allMatrixRoutes[index]
-		if row.Path != probe.Path || row.Contains != probe.Contains || row.ParseJSON != probe.ParseJSON {
-			t.Fatalf("matrix total browser route[%d]=%#v, runtime browser probe=%#v", index, row, probe)
-		}
-	}
-	for path, marker := range calendarRoutes {
-		found := false
-		for _, probe := range nativeContractClientVisibleScenarioData {
-			if probe.Path == path && probe.Contains == marker {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("matrix calendar fixture %q (%q) lacks a native browser probe", path, marker)
+func TestNativeRuntimeContractPlanRejectsUnsafeRelativePaths(t *testing.T) {
+	for _, value := range []string{"", "../escape", "/absolute", "scenario\\data", "scenario/../data"} {
+		if _, err := cleanRuntimeContractRelativePath(value); err == nil {
+			t.Fatalf("cleanRuntimeContractRelativePath(%q) accepted an unsafe value", value)
 		}
 	}
 }
@@ -311,7 +237,11 @@ func TestAssertClientVisibleScenarioDataRetriesTransientFixtureVisibility(t *tes
 	}))
 	defer server.Close()
 
-	if err := assertClientVisibleScenarioDataWithRetry(server.URL, requiredClientVisibleScenarioData, 3, time.Millisecond, func(time.Duration) {}); err != nil {
+	plan, err := loadNativeRuntimeContractPlan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := assertClientVisibleScenarioDataWithRetry(server.URL, plan.clientVisibleScenarioData(), 3, time.Millisecond, func(time.Duration) {}); err != nil {
 		t.Fatalf("assertClientVisibleScenarioDataWithRetry returned error: %v", err)
 	}
 	if configRequests != 3 {
@@ -325,7 +255,7 @@ func TestAssertClientVisibleScenarioDataRejectsFallbackContent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if err := assertClientVisibleScenarioDataWithRetry(server.URL, requiredClientVisibleScenarioData, 1, 0, nil); err == nil {
+	if err := assertClientVisibleScenarioDataWithRetry(server.URL, legacyClientVisibleScenarioData, 1, 0, nil); err == nil {
 		t.Fatal("assertClientVisibleScenarioData accepted a missing fixture marker")
 	}
 }
@@ -470,14 +400,62 @@ func TestAssertSessionCalendarWritebackReadyRejectsMissingDeleteCapability(t *te
 	}
 }
 
-func TestNativeShowcaseContractAvailabilityAndReadiness(t *testing.T) {
-	root := t.TempDir()
-	runtimeApp := filepath.Join(root, "runtime", "app")
-	if err := os.MkdirAll(filepath.Join(runtimeApp, "release"), 0700); err != nil {
+func nativeShowcaseContractForTest(t *testing.T, plan nativeRuntimeContractPlan) []byte {
+	t.Helper()
+	capabilities := map[string]bool{}
+	for _, capability := range plan.RequiredCapabilities {
+		capabilities[capability.ID] = true
+	}
+	body, err := json.Marshal(map[string]any{
+		"schema":       plan.Schema,
+		"contract":     plan.Contract,
+		"capabilities": capabilities,
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	contract := `{"schema":1,"contract":"dashgo-showcase/v1","capabilities":{"separateDataRoot":true,"scenarioManifest":true,"scenarioCalendars":true,"calendarWritebackAllowlist":true,"cacheRebuildReport":true,"statusEndpoint":true,"staticScenarioAssets":true}}`
-	if err := os.WriteFile(filepath.Join(runtimeApp, "release", "showcase-contract.json"), []byte(contract), 0600); err != nil {
+	return body
+}
+
+func nativeShowcaseReadyStatusForTest(t *testing.T, plan nativeRuntimeContractPlan) []byte {
+	t.Helper()
+	calendars := make([]map[string]any, 0, len(plan.writableCalendarRequirements()))
+	for source, candidates := range plan.writableCalendarRequirements() {
+		calendars = append(calendars, map[string]any{
+			"source": source, "writable": true, "enabled": true, "fixturePresent": true,
+			"writebackRegistered": true, "events": 6, "expectedEvents": 6, "writebackCandidates": candidates,
+		})
+	}
+	body, err := json.Marshal(map[string]any{
+		"contract": plan.Contract, "profile": plan.Readiness.Profile, "ready": true,
+		"calendars": calendars,
+		"cache": map[string]any{
+			"rebuilt": true, "events": plan.Readiness.Cache.MinimumEvents,
+			"writebackCandidates": plan.Readiness.Cache.MinimumWritebackCandidates,
+		},
+		"problems": []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+func TestNativeShowcaseContractAvailabilityAndReadiness(t *testing.T) {
+	plan, err := loadNativeRuntimeContractPlan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	runtimeApp := filepath.Join(root, "runtime", "app")
+	contractPath, err := plan.runtimeDeclarationPath(runtimeApp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(contractPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(contractPath, nativeShowcaseContractForTest(t, plan), 0600); err != nil {
 		t.Fatal(err)
 	}
 	a := &App{paths: paths{runtimeApp: runtimeApp}}
@@ -485,37 +463,54 @@ func TestNativeShowcaseContractAvailabilityAndReadiness(t *testing.T) {
 	if err != nil || !available {
 		t.Fatalf("nativeShowcaseContractAvailable() = %v, %v", available, err)
 	}
+	status := nativeShowcaseReadyStatusForTest(t, plan)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/showcase/status" {
+		if r.URL.Path != plan.Readiness.StatusPath {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = w.Write([]byte(`{"contract":"dashgo-showcase/v1","profile":"showcase","ready":true,"calendars":[{"source":"calendars/family.green.ics","writable":true,"enabled":true,"fixturePresent":true,"writebackRegistered":true,"events":6,"expectedEvents":6,"writebackCandidates":1},{"source":"calendars/school.blue.ics","writable":true,"enabled":true,"fixturePresent":true,"writebackRegistered":true,"events":6,"expectedEvents":6,"writebackCandidates":1},{"source":"calendars/home.amber.ics","writable":true,"enabled":true,"fixturePresent":true,"writebackRegistered":true,"events":6,"expectedEvents":6,"writebackCandidates":1},{"source":"calendars/plans.violet.ics","writable":true,"enabled":true,"fixturePresent":true,"writebackRegistered":true,"events":6,"expectedEvents":6,"writebackCandidates":1}],"cache":{"rebuilt":true,"events":24,"writebackCandidates":4},"problems":[]}`))
+		_, _ = w.Write(status)
 	}))
 	defer server.Close()
-	if err := assertNativeShowcaseContractReadyWithRetry(server.URL, 1, 0, nil); err != nil {
+	if err := assertNativeShowcaseContractReadyWithPlan(server.URL, plan, 1, 0, nil); err != nil {
 		t.Fatalf("native Showcase readiness = %v", err)
 	}
 }
 
 func TestNativeShowcaseContractRejectsIncompleteInputs(t *testing.T) {
-	root := t.TempDir()
-	runtimeApp := filepath.Join(root, "runtime", "app")
-	if err := os.MkdirAll(filepath.Join(runtimeApp, "release"), 0700); err != nil {
+	plan, err := loadNativeRuntimeContractPlan()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(runtimeApp, "release", "showcase-contract.json"), []byte(`{"schema":1,"contract":"dashgo-showcase/v1","capabilities":{}}`), 0600); err != nil {
+	root := t.TempDir()
+	runtimeApp := filepath.Join(root, "runtime", "app")
+	contractPath, err := plan.runtimeDeclarationPath(runtimeApp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(contractPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	incomplete, err := json.Marshal(map[string]any{"schema": plan.Schema, "contract": plan.Contract, "capabilities": map[string]bool{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(contractPath, incomplete, 0600); err != nil {
 		t.Fatal(err)
 	}
 	a := &App{paths: paths{runtimeApp: runtimeApp}}
 	if available, err := a.nativeShowcaseContractAvailable(); err == nil || available {
 		t.Fatalf("nativeShowcaseContractAvailable accepted incomplete contract: %v, %v", available, err)
 	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"contract":"dashgo-showcase/v1","ready":false,"calendars":[],"cache":{"rebuilt":false,"events":0,"writebackCandidates":0},"problems":["not ready"]}`))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != plan.Readiness.StatusPath {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"contract":"wrong","ready":false,"calendars":[],"cache":{"rebuilt":false,"events":0,"writebackCandidates":0},"problems":["not ready"]}`))
 	}))
 	defer server.Close()
-	if err := assertNativeShowcaseContractReadyWithRetry(server.URL, 1, 0, nil); err == nil {
+	if err := assertNativeShowcaseContractReadyWithPlan(server.URL, plan, 1, 0, nil); err == nil {
 		t.Fatal("native Showcase readiness accepted incomplete status")
 	}
 }

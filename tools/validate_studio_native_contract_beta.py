@@ -46,6 +46,7 @@ def main() -> int:
         "tools/test_prepare_dashgo_release_beta.py",
         "candidate_origin:",
         "release_package_version:",
+        'description: "Studio package identity: stable accepts Dash-Go X.Y.Z or X.Y.Z-rN; native beta accepts numeric core plus -test.N"',
     )
     require_text(
         intake,

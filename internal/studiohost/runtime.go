@@ -24,7 +24,57 @@ type runningRuntime struct {
 	cmd                     *exec.Cmd
 	url                     string
 	done                    <-chan struct{}
+	nativeContract          bool
 	retainScenarioAfterStop bool
+}
+
+type nativeShowcaseContract struct {
+	Schema       int             `json:"schema"`
+	Contract     string          `json:"contract"`
+	Capabilities map[string]bool `json:"capabilities"`
+}
+
+const nativeShowcaseContractName = "dashgo-showcase/v1"
+
+func (a *App) nativeShowcaseContractAvailable() (bool, error) {
+	path := filepath.Join(a.paths.runtimeApp, "release", "showcase-contract.json")
+	body, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read packaged Dash-Go Showcase contract: %w", err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	var contract nativeShowcaseContract
+	if err := decoder.Decode(&contract); err != nil {
+		return false, fmt.Errorf("decode packaged Dash-Go Showcase contract: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return false, errors.New("packaged Dash-Go Showcase contract contains more than one JSON value")
+		}
+		return false, fmt.Errorf("decode packaged Dash-Go Showcase contract: %w", err)
+	}
+	if contract.Schema != 1 || contract.Contract != nativeShowcaseContractName {
+		return false, errors.New("packaged Dash-Go Showcase contract is unsupported")
+	}
+	for _, capability := range []string{
+		"separateDataRoot",
+		"scenarioManifest",
+		"scenarioCalendars",
+		"calendarWritebackAllowlist",
+		"cacheRebuildReport",
+		"statusEndpoint",
+		"staticScenarioAssets",
+	} {
+		if !contract.Capabilities[capability] {
+			return false, fmt.Errorf("packaged Dash-Go Showcase contract is missing capability %q", capability)
+		}
+	}
+	return true, nil
 }
 
 const sessionCalendarWritebackFile = "calendar-writeback.json"
@@ -177,11 +227,17 @@ func (a *App) prepareScenarioForLocation(scenarioID, locationID string) error {
 	if err := os.MkdirAll(stageHome, 0700); err != nil {
 		return fmt.Errorf("create staged Showcase home: %w", err)
 	}
+	nativeContract, err := a.nativeShowcaseContractAvailable()
+	if err != nil {
+		return err
+	}
 	if err := fixtures.SeedForLocation(stageData, stageHome, scenario.ID, locationID, time.Now()); err != nil {
 		return fmt.Errorf("seed %s: %w", scenario.Title, err)
 	}
-	if err := rebaseSessionCalendarWritebackRegistry(filepath.Join(stageData, "config", sessionCalendarWritebackFile), stageHome, a.paths.scenarioHome); err != nil {
-		return fmt.Errorf("prepare Studio session calendars: %w", err)
+	if !nativeContract {
+		if err := rebaseSessionCalendarWritebackRegistry(filepath.Join(stageData, "config", sessionCalendarWritebackFile), stageHome, a.paths.scenarioHome); err != nil {
+			return fmt.Errorf("prepare Studio session calendars: %w", err)
+		}
 	}
 	if err := fixtures.WriteRuntimeMarker(stage, scenario.ID, locationID, time.Now()); err != nil {
 		return fmt.Errorf("write Showcase marker: %w", err)
@@ -189,9 +245,11 @@ func (a *App) prepareScenarioForLocation(scenarioID, locationID string) error {
 	if err := atomicScenarioSwap(a.paths.scenarioRoot, stage); err != nil {
 		return fmt.Errorf("activate staged Showcase scenario data: %w", err)
 	}
-	if err := assertSessionCalendarWritebackRegistry(filepath.Join(a.paths.scenarioData, "config", sessionCalendarWritebackFile), a.paths.scenarioHome); err != nil {
-		_ = a.discardSessionScenario()
-		return fmt.Errorf("verify activated Studio session calendars: %w", err)
+	if !nativeContract {
+		if err := assertSessionCalendarWritebackRegistry(filepath.Join(a.paths.scenarioData, "config", sessionCalendarWritebackFile), a.paths.scenarioHome); err != nil {
+			_ = a.discardSessionScenario()
+			return fmt.Errorf("verify activated Studio session calendars: %w", err)
+		}
 	}
 	return nil
 }
@@ -217,15 +275,29 @@ func (a *App) startRuntime() (*runningRuntime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open Showcase runtime log: %w", err)
 	}
+	nativeContract, err := a.nativeShowcaseContractAvailable()
+	if err != nil {
+		_ = logFile.Close()
+		return nil, err
+	}
 	cmd := exec.Command(exe)
 	prepareStudioChildCommand(cmd)
 	cmd.Dir = a.paths.runtimeApp
-	cmd.Env = append(os.Environ(),
-		"DASHGO_HOME="+a.paths.scenarioHome,
-		"DASHGO_SHOWCASE=1",
-		"DASHGO_SHOWCASE_DATA_ROOT="+a.paths.scenarioData,
-		fmt.Sprintf("DASH_CONTROL_PORT=%d", port),
-	)
+	env := []string{fmt.Sprintf("DASH_CONTROL_PORT=%d", port)}
+	if nativeContract {
+		env = append(env,
+			"DASHGO_RUNTIME_PROFILE=showcase",
+			"DASHGO_SHOWCASE_MANIFEST="+filepath.Join(a.paths.scenarioData, "showcase-manifest.json"),
+			"DASHGO_DATA_ROOT="+a.paths.scenarioData,
+		)
+	} else {
+		env = append(env,
+			"DASHGO_HOME="+a.paths.scenarioHome,
+			"DASHGO_SHOWCASE=1",
+			"DASHGO_SHOWCASE_DATA_ROOT="+a.paths.scenarioData,
+		)
+	}
+	cmd.Env = append(os.Environ(), env...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	if err := cmd.Start(); err != nil {
@@ -233,7 +305,7 @@ func (a *App) startRuntime() (*runningRuntime, error) {
 		return nil, fmt.Errorf("start local Showcase server: %w", err)
 	}
 	done := make(chan struct{})
-	runtime := &runningRuntime{cmd: cmd, url: fmt.Sprintf("http://127.0.0.1:%d", port), done: done}
+	runtime := &runningRuntime{cmd: cmd, url: fmt.Sprintf("http://127.0.0.1:%d", port), done: done, nativeContract: nativeContract}
 	go func() {
 		_ = cmd.Wait()
 		_ = logFile.Close()
@@ -247,7 +319,17 @@ func (a *App) startRuntime() (*runningRuntime, error) {
 		}
 		return nil, fmt.Errorf("Showcase server did not become ready: %w", err)
 	}
-	if err := a.assertClientVisibleScenarioData(runtime.url); err != nil {
+	if nativeContract {
+		if err := a.assertNativeShowcaseContractReady(runtime.url); err != nil {
+			a.stopRuntime(runtime)
+			tail, _ := tailFile(logPath, 80*1024)
+			if tail != "" {
+				return nil, fmt.Errorf("Dash-Go Showcase Contract v1 did not become ready: %w\n%s", err, tail)
+			}
+			return nil, fmt.Errorf("Dash-Go Showcase Contract v1 did not become ready: %w", err)
+		}
+	}
+	if err := a.assertClientVisibleScenarioData(runtime.url, nativeContract); err != nil {
 		a.stopRuntime(runtime)
 		tail, _ := tailFile(logPath, 80*1024)
 		if tail != "" {
@@ -255,21 +337,25 @@ func (a *App) startRuntime() (*runningRuntime, error) {
 		}
 		return nil, fmt.Errorf("Showcase server did not expose the active scenario data; refusing to open an empty Studio session: %w", err)
 	}
-	if err := a.assertSessionCalendarWritebackReady(runtime.url); err != nil {
-		a.stopRuntime(runtime)
-		tail, _ := tailFile(logPath, 80*1024)
-		if tail != "" {
-			return nil, fmt.Errorf("Showcase session calendars did not become writable; refusing to open a misleading Studio session: %w\n%s", err, tail)
+	if !nativeContract {
+		if err := a.assertSessionCalendarWritebackReady(runtime.url); err != nil {
+			a.stopRuntime(runtime)
+			tail, _ := tailFile(logPath, 80*1024)
+			if tail != "" {
+				return nil, fmt.Errorf("Showcase session calendars did not become writable; refusing to open a misleading Studio session: %w\n%s", err, tail)
+			}
+			return nil, fmt.Errorf("Showcase session calendars did not become writable; refusing to open a misleading Studio session: %w", err)
 		}
-		return nil, fmt.Errorf("Showcase session calendars did not become writable; refusing to open a misleading Studio session: %w", err)
 	}
-	if err := a.assertShowcaseSessionEventManagementReady(runtime.url); err != nil {
-		a.stopRuntime(runtime)
-		tail, _ := tailFile(logPath, 80*1024)
-		if tail != "" {
-			return nil, fmt.Errorf("Showcase event popup capabilities did not become ready; refusing to open a misleading Studio session: %w\n%s", err, tail)
+	if !nativeContract {
+		if err := a.assertShowcaseSessionEventManagementReady(runtime.url); err != nil {
+			a.stopRuntime(runtime)
+			tail, _ := tailFile(logPath, 80*1024)
+			if tail != "" {
+				return nil, fmt.Errorf("Showcase event popup capabilities did not become ready; refusing to open a misleading Studio session: %w\n%s", err, tail)
+			}
+			return nil, fmt.Errorf("Showcase event popup capabilities did not become ready; refusing to open a misleading Studio session: %w", err)
 		}
-		return nil, fmt.Errorf("Showcase event popup capabilities did not become ready; refusing to open a misleading Studio session: %w", err)
 	}
 
 	a.mu.Lock()
@@ -398,17 +484,30 @@ const (
 // server before every individual fixture file is immediately openable. Do not
 // open the browser on that first transient response: wait a short, bounded
 // time for every browser-consumed route to become visible.
-func (a *App) assertClientVisibleScenarioData(baseURL string) error {
-	return assertClientVisibleScenarioDataWithRetry(
-		baseURL,
-		clientVisibleScenarioDataAttempts,
-		clientVisibleScenarioDataRetryDelay,
-		time.Sleep,
-	)
+var nativeContractClientVisibleScenarioData = []clientVisibleScenarioData{
+	{Path: "/config/config.local.js", Contains: "Generated for Dash-Go Showcase Studio"},
+	{Path: "/config/compliments.json", Contains: "studio-normal", ParseJSON: true},
+	{Path: "/calendars/calendars.json", Contains: "calendars/family.green.ics", ParseJSON: true},
+	{Path: "/calendars/calendars.json", Contains: "calendars/school.blue.ics", ParseJSON: true},
+	{Path: "/calendars/calendars.json", Contains: "calendars/home.amber.ics", ParseJSON: true},
+	{Path: "/calendars/calendars.json", Contains: "calendars/plans.violet.ics", ParseJSON: true},
+	{Path: "/calendars/family.green.ics", Contains: "SUMMARY:Family meal plan"},
+	{Path: "/calendars/school.blue.ics", Contains: "SUMMARY:Summer learning camp"},
+	{Path: "/calendars/home.amber.ics", Contains: "SUMMARY:Grocery pickup"},
+	{Path: "/calendars/plans.violet.ics", Contains: "SUMMARY:Saturday farmers market"},
+}
+
+func (a *App) assertClientVisibleScenarioData(baseURL string, nativeContract bool) error {
+	probes := requiredClientVisibleScenarioData
+	if nativeContract {
+		probes = nativeContractClientVisibleScenarioData
+	}
+	return assertClientVisibleScenarioDataWithRetry(baseURL, probes, clientVisibleScenarioDataAttempts, clientVisibleScenarioDataRetryDelay, time.Sleep)
 }
 
 func assertClientVisibleScenarioDataWithRetry(
 	baseURL string,
+	probes []clientVisibleScenarioData,
 	attempts int,
 	delay time.Duration,
 	sleep func(time.Duration),
@@ -422,7 +521,7 @@ func assertClientVisibleScenarioDataWithRetry(
 
 	var last error
 	for attempt := 0; attempt < attempts; attempt++ {
-		last = assertClientVisibleScenarioDataOnce(baseURL)
+		last = assertClientVisibleScenarioDataOnce(baseURL, probes)
 		if last == nil {
 			return nil
 		}
@@ -433,9 +532,9 @@ func assertClientVisibleScenarioDataWithRetry(
 	return fmt.Errorf("Showcase scenario data did not become client-visible after %d attempt(s): %w", attempts, last)
 }
 
-func assertClientVisibleScenarioDataOnce(baseURL string) error {
+func assertClientVisibleScenarioDataOnce(baseURL string, probes []clientVisibleScenarioData) error {
 	client := &http.Client{Timeout: 1500 * time.Millisecond}
-	for _, probe := range requiredClientVisibleScenarioData {
+	for _, probe := range probes {
 		response, err := client.Get(baseURL + probe.Path)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", probe.Path, err)
@@ -457,6 +556,92 @@ func assertClientVisibleScenarioDataOnce(baseURL string) error {
 		if !bytes.Contains(body, []byte(probe.Contains)) {
 			return fmt.Errorf("%s did not contain the required Showcase fixture marker", probe.Path)
 		}
+	}
+	return nil
+}
+
+type nativeShowcaseStatus struct {
+	Contract  string `json:"contract"`
+	Profile   string `json:"profile"`
+	Ready     bool   `json:"ready"`
+	Calendars []struct {
+		Source              string `json:"source"`
+		Writable            bool   `json:"writable"`
+		Enabled             bool   `json:"enabled"`
+		FixturePresent      bool   `json:"fixturePresent"`
+		WritebackRegistered bool   `json:"writebackRegistered"`
+		Events              int    `json:"events"`
+		ExpectedEvents      int    `json:"expectedEvents"`
+		WritebackCandidates int    `json:"writebackCandidates"`
+	} `json:"calendars"`
+	Cache struct {
+		Rebuilt             bool `json:"rebuilt"`
+		Events              int  `json:"events"`
+		WritebackCandidates int  `json:"writebackCandidates"`
+	} `json:"cache"`
+	Problems []string `json:"problems"`
+}
+
+func (a *App) assertNativeShowcaseContractReady(baseURL string) error {
+	return assertNativeShowcaseContractReadyWithRetry(baseURL, clientVisibleScenarioDataAttempts, clientVisibleScenarioDataRetryDelay, time.Sleep)
+}
+
+func assertNativeShowcaseContractReadyWithRetry(baseURL string, attempts int, delay time.Duration, sleep func(time.Duration)) error {
+	if attempts < 1 {
+		attempts = 1
+	}
+	if sleep == nil {
+		sleep = time.Sleep
+	}
+	var last error
+	for attempt := 0; attempt < attempts; attempt++ {
+		last = assertNativeShowcaseContractReadyOnce(baseURL)
+		if last == nil {
+			return nil
+		}
+		if attempt+1 < attempts && delay > 0 {
+			sleep(delay)
+		}
+	}
+	return fmt.Errorf("Dash-Go Showcase Contract v1 did not become ready after %d attempt(s): %w", attempts, last)
+}
+
+func assertNativeShowcaseContractReadyOnce(baseURL string) error {
+	client := &http.Client{Timeout: 1500 * time.Millisecond}
+	response, err := client.Get(baseURL + "/api/showcase/status")
+	if err != nil {
+		return fmt.Errorf("read Dash-Go Showcase status: %w", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 128*1024))
+	if err != nil {
+		return fmt.Errorf("read Dash-Go Showcase status response: %w", err)
+	}
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("Dash-Go Showcase status returned HTTP %d", response.StatusCode)
+	}
+	var status nativeShowcaseStatus
+	if err := json.Unmarshal(body, &status); err != nil {
+		return fmt.Errorf("decode Dash-Go Showcase status: %w", err)
+	}
+	if status.Contract != nativeShowcaseContractName || status.Profile != "showcase" || !status.Ready || len(status.Problems) != 0 {
+		return fmt.Errorf("Dash-Go Showcase status is not ready: %#v", status)
+	}
+	if !status.Cache.Rebuilt || status.Cache.Events < 1 || status.Cache.WritebackCandidates < 4 {
+		return fmt.Errorf("Dash-Go Showcase cache is incomplete: %#v", status.Cache)
+	}
+	seen := map[string]bool{}
+	for _, calendar := range status.Calendars {
+		if _, expected := sessionCalendarWritableSources[calendar.Source]; !expected {
+			continue
+		}
+		if !calendar.Writable || !calendar.Enabled || !calendar.FixturePresent || !calendar.WritebackRegistered || calendar.Events < calendar.ExpectedEvents || calendar.WritebackCandidates < 1 {
+			return fmt.Errorf("Dash-Go Showcase calendar %q is not ready: %#v", calendar.Source, calendar)
+		}
+		seen[calendar.Source] = true
+	}
+	if len(seen) != len(sessionCalendarWritableSources) {
+		return fmt.Errorf("Dash-Go Showcase status did not report all four Studio session calendars")
 	}
 	return nil
 }

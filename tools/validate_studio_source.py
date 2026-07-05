@@ -160,6 +160,9 @@ def main() -> int:
     for token in ("Location", "LookupLocation", "SeedForLocation", "AllLocations", "studio-discovery", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu"):
         if token not in fixtures:
             raise CheckError(f"Studio city-fixture contract is missing: {token}")
+    for token in ("showcase-manifest.json", "dashgo-showcase/v1", "seedShowcaseContractManifest", ".dashboard-vdirsyncer", "showcase-"):
+        if token not in fixtures:
+            raise CheckError(f"Studio native Showcase manifest contract is missing: {token}")
     for token in ("/api/start-tour", "/api/restart-tour", "/api/return-home", "/api/viewport", "prepareScenarioForLocation", "defer func() { _ = a.clean() }()"):
         if token not in host_controller:
             raise CheckError(f"Studio Start Tour lifecycle contract is missing: {token}")
@@ -168,7 +171,7 @@ def main() -> int:
     for retired in ("Capture Gallery", "/api/launch", "Scenario", "id=\"reset\""):
         if retired in hub_html or retired in hub_js:
             raise CheckError(f"Studio Hub still exposes a retired scenario/reset surface: {retired}")
-    for token in ("prepareStudioChildCommand(cmd)", "func (a *App) prepareScenarioForLocation", "func (a *App) stopActiveRuntime", "DASHGO_SHOWCASE_DATA_ROOT", "a.paths.scenarioData", "cmd.Dir = a.paths.runtimeApp"):
+    for token in ("prepareStudioChildCommand(cmd)", "func (a *App) prepareScenarioForLocation", "func (a *App) stopActiveRuntime", "DASHGO_SHOWCASE_DATA_ROOT", "DASHGO_RUNTIME_PROFILE=showcase", "DASHGO_SHOWCASE_MANIFEST=", "DASHGO_DATA_ROOT=", "nativeShowcaseContractAvailable", "a.paths.scenarioData", "cmd.Dir = a.paths.runtimeApp"):
         if token not in host_runtime:
             raise CheckError(f"Studio runtime isolation contract is missing: {token}")
     for retired in ("workspaceApp", "workspaceHome", "workspaceRoot", ".workspace-stage-", "copyTree(a.paths.runtimeApp"):

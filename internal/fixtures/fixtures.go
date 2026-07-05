@@ -167,7 +167,11 @@ func SeedForLocation(appRoot, home, scenarioID, locationID string, now time.Time
 	if err := seedSchedules(config, today); err != nil {
 		return err
 	}
-	if err := seedCalendars(calendarDir, config, home, scenario.ID, today, now.Location(), profile); err != nil {
+	calendarFixtures, err := seedCalendars(calendarDir, config, home, scenario.ID, today, now.Location(), profile)
+	if err != nil {
+		return err
+	}
+	if err := seedShowcaseContractManifest(appRoot, scenario.ID, calendarFixtures); err != nil {
 		return err
 	}
 	if err := writeJSON(filepath.Join(config, "chalkboard.json"), map[string]any{"version": 1, "strokes": []any{}}, 0644); err != nil {
@@ -427,12 +431,12 @@ type showcaseCalendarEvent struct {
 	RecurrenceID time.Time
 }
 
-func seedCalendars(calendarDir, config, home, scenario string, today time.Time, loc *time.Location, profile LocationProfile) error {
+func seedCalendars(calendarDir, config, home, scenario string, today time.Time, loc *time.Location, profile LocationProfile) ([]showcaseCalendarFixture, error) {
 	fixtures := showcaseCalendars(scenario, today, loc, profile)
 	manifest := make([]any, 0, len(fixtures))
 	for _, fixture := range fixtures {
 		if err := writeCalendar(filepath.Join(calendarDir, fixture.File), fixture.Name, today, fixture.Events); err != nil {
-			return err
+			return nil, err
 		}
 		entry := map[string]any{
 			"url": "calendars/" + fixture.File, "name": fixture.Name, "color": fixture.Color,
@@ -447,9 +451,52 @@ func seedCalendars(calendarDir, config, home, scenario string, today time.Time, 
 		manifest = append(manifest, entry)
 	}
 	if err := writeJSON(filepath.Join(calendarDir, "calendars.json"), manifest, 0644); err != nil {
-		return err
+		return nil, err
 	}
-	return seedSessionWriteback(config, home, today, fixtures)
+	if err := seedSessionWriteback(config, home, today, fixtures); err != nil {
+		return nil, err
+	}
+	return fixtures, nil
+}
+
+// seedShowcaseContractManifest writes the native Dash-Go Showcase Contract v1
+// input beside Studio's disposable scenario data. It deliberately declares only
+// the four session-editable calendars; read-only supporting feeds remain Studio
+// fixture data rather than part of the contract-owned writeback surface.
+func seedShowcaseContractManifest(appRoot, scenario string, fixtures []showcaseCalendarFixture) error {
+	calendars := make([]any, 0, 4)
+	for _, fixture := range fixtures {
+		if !fixture.Editable {
+			continue
+		}
+		collectionName := "showcase-" + strings.TrimSuffix(fixture.File, filepath.Ext(fixture.File))
+		calendars = append(calendars, map[string]any{
+			"source":     "calendars/" + fixture.File,
+			"name":       fixture.Name,
+			"color":      fixture.Color,
+			"collection": filepath.ToSlash(filepath.Join("home", ".dashboard-vdirsyncer", "collections", collectionName)),
+			"writable":   true,
+			"enabled":    true,
+			// The native cache is intentionally bounded by its rolling horizon. A
+			// nonzero floor proves this declared fixture was actually indexed without
+			// coupling Studio to a date-dependent recurrence expansion count.
+			"expectedEvents": 1,
+		})
+	}
+	if len(calendars) != 4 {
+		return fmt.Errorf("Showcase Contract v1 requires exactly four editable Studio calendars, found %d", len(calendars))
+	}
+	return writeJSON(filepath.Join(appRoot, "showcase-manifest.json"), map[string]any{
+		"schema":   1,
+		"contract": "dashgo-showcase/v1",
+		"profile":  "showcase",
+		"scenario": scenario,
+		"cache": map[string]any{
+			"daysPast":   showcasePastDays,
+			"daysFuture": showcaseFutureDays,
+		},
+		"calendars": calendars,
+	}, 0600)
 }
 
 func seedSessionWriteback(config, home string, today time.Time, fixtures []showcaseCalendarFixture) error {

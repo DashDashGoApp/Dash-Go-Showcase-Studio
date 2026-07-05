@@ -94,6 +94,13 @@ jobs:
           python3 tools/validate_studio_stable_release_bridge.py --root .
           python3 tools/validate_studio_windows_candidate.py --root .
 
+      - name: Verify automatic legacy bridge candidate gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/validate_studio_legacy_bridge_candidate.py --root .
+          python3 tools/test_run_legacy_bridge_candidate.py
+
       - name: Verify pinned Go version
         shell: bash
         run: |

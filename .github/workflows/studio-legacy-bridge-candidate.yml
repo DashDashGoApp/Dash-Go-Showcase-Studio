@@ -1,0 +1,140 @@
+name: Legacy Bridge Candidate Proof
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+run-name: Legacy bridge proof - ${{ github.event.pull_request.number || github.ref_name }}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: legacy-bridge-candidate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scope:
+    name: Determine whether the legacy bridge is affected
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      bridge_changed: ${{ steps.scope.outputs.bridge_changed }}
+      same_repository: ${{ steps.scope.outputs.same_repository }}
+
+    steps:
+      - name: Determine bridge scope
+        id: scope
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || '' }}
+        run: |
+          set -euo pipefail
+          bridge_changed=false
+          same_repository=false
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            bridge_changed=true
+            same_repository=true
+          else
+            if [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+              echo "pull_request event is missing its number" >&2
+              exit 1
+            fi
+            if [[ "$HEAD_REPOSITORY" == "$GITHUB_REPOSITORY" ]]; then
+              same_repository=true
+            fi
+            mapfile -t changed_paths < <(
+              gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files?per_page=100" --jq '.[].filename'
+            )
+            for path in "${changed_paths[@]}"; do
+              case "$path" in
+                .github/workflows/studio-legacy-bridge-candidate.yml|\
+                .github/workflows/studio-stage-candidate.yml|\
+                .github/workflows/studio-windows-package-candidate.yml|\
+                ci/stage-package.py|ci/package-ubuntu.sh|ci/package-windows.ps1|\
+                packaging/windows/DashGoShowcaseStudio.iss|\
+                tools/apply_dashgo_compatibility.py|tools/dashgo_compatibility.json|\
+                tools/patch_dashgo_engine.py|tools/patch_dashgo_r7.py|\
+                tools/run_legacy_bridge_candidate.py|\
+                tools/test_run_legacy_bridge_candidate.py|\
+                tools/validate_studio_legacy_bridge_candidate.py|\
+                tools/prepare_dashgo_release.py|\
+                tools/validate_studio_stable_release_bridge.py|\
+                tools/validate_studio_windows_candidate.py)
+                  bridge_changed=true
+                  break
+                  ;;
+              esac
+            done
+          fi
+
+          echo "bridge_changed=$bridge_changed" >> "$GITHUB_OUTPUT"
+          echo "same_repository=$same_repository" >> "$GITHUB_OUTPUT"
+          printf 'Bridge-affecting paths changed: %s\n' "$bridge_changed"
+          printf 'Head is in this repository: %s\n' "$same_repository"
+
+  bridge-candidate-proof:
+    name: Stage and Windows installer proof
+    needs: scope
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    permissions:
+      contents: read
+      actions: write
+
+    steps:
+      - name: Reject a failed scope calculation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ needs.scope.result }}" = "success"
+
+      - name: Check out Studio source at the exact head commit
+        if: ${{ needs.scope.outputs.bridge_changed == 'true' }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+
+      - name: Set up Python
+        if: ${{ needs.scope.outputs.bridge_changed == 'true' }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Mark non-bridge changes as satisfied
+        if: ${{ needs.scope.outputs.bridge_changed != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "## Legacy bridge candidate proof not required" >> "$GITHUB_STEP_SUMMARY"
+          echo "This pull request does not modify the legacy bridge, its adapters, or its package-candidate path." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Require a trusted same-repository branch for bridge changes
+        if: ${{ needs.scope.outputs.bridge_changed == 'true' && needs.scope.outputs.same_repository != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "## Legacy bridge candidate proof blocked" >> "$GITHUB_STEP_SUMMARY"
+          echo "A bridge-affecting pull request from a fork cannot safely dispatch the trusted Stage and Windows workflows with its read-only token." >> "$GITHUB_STEP_SUMMARY"
+          echo "Bring the reviewed branch into DashDashGoApp/Dash-Go-Showcase-Studio, then rerun this proof there." >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - name: Dispatch and verify Stage plus Windows candidate proof
+        if: ${{ needs.scope.outputs.bridge_changed == 'true' && needs.scope.outputs.same_repository == 'true' }}
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          STUDIO_BRANCH: ${{ github.head_ref || github.ref_name }}
+          STUDIO_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          python3 tools/run_legacy_bridge_candidate.py --root .

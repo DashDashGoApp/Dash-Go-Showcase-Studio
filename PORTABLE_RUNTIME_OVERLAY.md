@@ -33,3 +33,9 @@ Every accepted bridge report lists:
 - the required Stage/Linux and Windows candidate checks.
 
 A Studio candidate is not promotable merely because the bridge accepted its source. It must still pass the staged Linux package/runtime self-test and the Windows installer install/uninstall smoke.
+
+## Automatic legacy-bridge proof
+
+A pull request that changes the legacy compatibility bridge, either adapter, its Stage/Windows candidate workflows, or the corresponding packaging path automatically runs the **Legacy Bridge Candidate Proof** workflow. The workflow uses the profile's minimum reviewed stable version, verifies the immutable Dash-Go release asset identity, dispatches the existing Stage Candidate, then dispatches the matching Windows installer install/self-test/uninstall smoke from that Stage run. The parent pull-request check succeeds only when both downstream candidates succeed.
+
+The status check is intentionally a fast green no-op for unrelated pull requests so it can be required on `main` without blocking ordinary documentation or Hub-only changes. A bridge-affecting fork pull request fails closed because GitHub supplies a read-only token; a maintainer must bring the reviewed source into a same-repository branch before the trusted Stage and Windows candidate workflows can be dispatched.

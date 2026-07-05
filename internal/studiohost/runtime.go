@@ -263,6 +263,15 @@ func (a *App) startRuntime() (*runningRuntime, error) {
 		}
 		return nil, fmt.Errorf("Showcase session calendars did not become writable; refusing to open a misleading Studio session: %w", err)
 	}
+	if err := a.assertShowcaseSessionEventManagementReady(runtime.url); err != nil {
+		a.stopRuntime(runtime)
+		tail, _ := tailFile(logPath, 80*1024)
+		if tail != "" {
+			return nil, fmt.Errorf("Showcase event popup capabilities did not become ready; refusing to open a misleading Studio session: %w\n%s", err, tail)
+		}
+		return nil, fmt.Errorf("Showcase event popup capabilities did not become ready; refusing to open a misleading Studio session: %w", err)
+	}
+
 	a.mu.Lock()
 	a.runtime = runtime
 	a.mu.Unlock()

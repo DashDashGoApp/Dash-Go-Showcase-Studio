@@ -39,3 +39,10 @@ A Studio candidate is not promotable merely because the bridge accepted its sour
 A pull request that changes the legacy compatibility bridge, either adapter, its Stage/Windows candidate workflows, or the corresponding packaging path automatically runs the **Legacy Bridge Candidate Proof** workflow. The workflow uses the profile's minimum reviewed stable version, verifies the immutable Dash-Go release asset identity, dispatches the existing Stage Candidate, then dispatches the matching Windows installer install/self-test/uninstall smoke from that Stage run. The parent pull-request check succeeds only when both downstream candidates succeed.
 
 The status check is intentionally a fast green no-op for unrelated pull requests so it can be required on `main` without blocking ordinary documentation or Hub-only changes. A bridge-affecting fork pull request fails closed because GitHub supplies a read-only token; a maintainer must bring the reviewed source into a same-repository branch before the trusted Stage and Windows candidate workflows can be dispatched.
+
+
+## Native Contract v1 transition
+
+Studio always seeds `showcase-manifest.json` with its four disposable editable calendars. When the packaged Dash-Go runtime contains a valid `release/showcase-contract.json`, Studio launches it through `DASHGO_RUNTIME_PROFILE=showcase`, `DASHGO_SHOWCASE_MANIFEST`, and `DASHGO_DATA_ROOT`, then refuses to open until `/api/showcase/status` reports the native contract, rebuilt cache, all four writable calendars, and writeback candidates.
+
+Older packaged Dash-Go releases without that declaration continue through the checked-in legacy bridge. Studio does not guess: a malformed or incomplete native declaration fails closed, while an absent declaration is the explicit legacy-compatibility fallback until the contract-native stage path replaces the overlays.

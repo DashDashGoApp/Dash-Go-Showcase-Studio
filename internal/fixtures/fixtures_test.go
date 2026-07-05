@@ -24,6 +24,7 @@ func TestRealityLayerSeedsSevenBrowserCalendarsAndSessionWriteback(t *testing.T)
 	}
 
 	for _, rel := range []string{
+		"showcase-manifest.json",
 		"config/household-people.json",
 		"config/chore-wheel.json",
 		"config/routines.json",
@@ -151,6 +152,35 @@ func TestRealityLayerSeedsSevenBrowserCalendarsAndSessionWriteback(t *testing.T)
 	}
 	if len(wantWritable) != 0 {
 		t.Fatalf("Studio writeback registry is missing: %#v", wantWritable)
+	}
+
+	manifestBytes, err := os.ReadFile(filepath.Join(app, "showcase-manifest.json"))
+	if err != nil {
+		t.Fatalf("read native Showcase manifest: %v", err)
+	}
+	var nativeManifest struct {
+		Schema    int    `json:"schema"`
+		Contract  string `json:"contract"`
+		Profile   string `json:"profile"`
+		Scenario  string `json:"scenario"`
+		Calendars []struct {
+			Source         string `json:"source"`
+			Collection     string `json:"collection"`
+			Writable       bool   `json:"writable"`
+			Enabled        bool   `json:"enabled"`
+			ExpectedEvents int    `json:"expectedEvents"`
+		} `json:"calendars"`
+	}
+	if err := json.Unmarshal(manifestBytes, &nativeManifest); err != nil {
+		t.Fatalf("parse native Showcase manifest: %v", err)
+	}
+	if nativeManifest.Schema != 1 || nativeManifest.Contract != "dashgo-showcase/v1" || nativeManifest.Profile != "showcase" || nativeManifest.Scenario != DefaultScenario || len(nativeManifest.Calendars) != 4 {
+		t.Fatalf("unexpected native Showcase manifest: %#v", nativeManifest)
+	}
+	for _, calendar := range nativeManifest.Calendars {
+		if !calendar.Writable || !calendar.Enabled || calendar.ExpectedEvents < 1 || !strings.HasPrefix(calendar.Collection, "home/.dashboard-vdirsyncer/collections/showcase-") {
+			t.Fatalf("native Showcase manifest calendar is invalid: %#v", calendar)
+		}
 	}
 
 	sessionBytes, err := os.ReadFile(filepath.Join(app, "config", "showcase-session-calendar.json"))

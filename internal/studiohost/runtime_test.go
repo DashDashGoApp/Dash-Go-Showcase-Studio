@@ -125,7 +125,7 @@ func TestAssertClientVisibleScenarioData(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if err := (&App{}).assertClientVisibleScenarioData(server.URL); err != nil {
+	if err := (&App{}).assertClientVisibleScenarioData(server.URL, false); err != nil {
 		t.Fatalf("assertClientVisibleScenarioData returned error: %v", err)
 	}
 }
@@ -153,7 +153,7 @@ func TestAssertClientVisibleScenarioDataRetriesTransientFixtureVisibility(t *tes
 	}))
 	defer server.Close()
 
-	if err := assertClientVisibleScenarioDataWithRetry(server.URL, 3, time.Millisecond, func(time.Duration) {}); err != nil {
+	if err := assertClientVisibleScenarioDataWithRetry(server.URL, requiredClientVisibleScenarioData, 3, time.Millisecond, func(time.Duration) {}); err != nil {
 		t.Fatalf("assertClientVisibleScenarioDataWithRetry returned error: %v", err)
 	}
 	if configRequests != 3 {
@@ -167,7 +167,7 @@ func TestAssertClientVisibleScenarioDataRejectsFallbackContent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if err := assertClientVisibleScenarioDataWithRetry(server.URL, 1, 0, nil); err == nil {
+	if err := assertClientVisibleScenarioDataWithRetry(server.URL, requiredClientVisibleScenarioData, 1, 0, nil); err == nil {
 		t.Fatal("assertClientVisibleScenarioData accepted a missing fixture marker")
 	}
 }
@@ -309,5 +309,55 @@ func TestAssertSessionCalendarWritebackReadyRejectsMissingDeleteCapability(t *te
 	defer server.Close()
 	if err := assertSessionCalendarWritebackReadyWithRetry(server.URL, 1, 0, nil); err == nil {
 		t.Fatal("writeback readiness accepted a calendar without delete capability")
+	}
+}
+
+func TestNativeShowcaseContractAvailabilityAndReadiness(t *testing.T) {
+	root := t.TempDir()
+	runtimeApp := filepath.Join(root, "runtime", "app")
+	if err := os.MkdirAll(filepath.Join(runtimeApp, "release"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	contract := `{"schema":1,"contract":"dashgo-showcase/v1","capabilities":{"separateDataRoot":true,"scenarioManifest":true,"scenarioCalendars":true,"calendarWritebackAllowlist":true,"cacheRebuildReport":true,"statusEndpoint":true,"staticScenarioAssets":true}}`
+	if err := os.WriteFile(filepath.Join(runtimeApp, "release", "showcase-contract.json"), []byte(contract), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a := &App{paths: paths{runtimeApp: runtimeApp}}
+	available, err := a.nativeShowcaseContractAvailable()
+	if err != nil || !available {
+		t.Fatalf("nativeShowcaseContractAvailable() = %v, %v", available, err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/showcase/status" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"contract":"dashgo-showcase/v1","profile":"showcase","ready":true,"calendars":[{"source":"calendars/family.green.ics","writable":true,"enabled":true,"fixturePresent":true,"writebackRegistered":true,"events":6,"expectedEvents":6,"writebackCandidates":1},{"source":"calendars/school.blue.ics","writable":true,"enabled":true,"fixturePresent":true,"writebackRegistered":true,"events":6,"expectedEvents":6,"writebackCandidates":1},{"source":"calendars/home.amber.ics","writable":true,"enabled":true,"fixturePresent":true,"writebackRegistered":true,"events":6,"expectedEvents":6,"writebackCandidates":1},{"source":"calendars/plans.violet.ics","writable":true,"enabled":true,"fixturePresent":true,"writebackRegistered":true,"events":6,"expectedEvents":6,"writebackCandidates":1}],"cache":{"rebuilt":true,"events":24,"writebackCandidates":4},"problems":[]}`))
+	}))
+	defer server.Close()
+	if err := assertNativeShowcaseContractReadyWithRetry(server.URL, 1, 0, nil); err != nil {
+		t.Fatalf("native Showcase readiness = %v", err)
+	}
+}
+
+func TestNativeShowcaseContractRejectsIncompleteInputs(t *testing.T) {
+	root := t.TempDir()
+	runtimeApp := filepath.Join(root, "runtime", "app")
+	if err := os.MkdirAll(filepath.Join(runtimeApp, "release"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runtimeApp, "release", "showcase-contract.json"), []byte(`{"schema":1,"contract":"dashgo-showcase/v1","capabilities":{}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a := &App{paths: paths{runtimeApp: runtimeApp}}
+	if available, err := a.nativeShowcaseContractAvailable(); err == nil || available {
+		t.Fatalf("nativeShowcaseContractAvailable accepted incomplete contract: %v, %v", available, err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"contract":"dashgo-showcase/v1","ready":false,"calendars":[],"cache":{"rebuilt":false,"events":0,"writebackCandidates":0},"problems":["not ready"]}`))
+	}))
+	defer server.Close()
+	if err := assertNativeShowcaseContractReadyWithRetry(server.URL, 1, 0, nil); err == nil {
+		t.Fatal("native Showcase readiness accepted incomplete status")
 	}
 }

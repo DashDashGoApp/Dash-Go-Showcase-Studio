@@ -60,6 +60,17 @@ WINDOWS_AS_INVOKER_MANIFEST = """<?xml version=\"1.0\" encoding=\"UTF-8\" standa
 </assembly>
 """
 
+NATIVE_SHOWCASE_CONTRACT = "dashgo-showcase/v1"
+NATIVE_SHOWCASE_CAPABILITIES = (
+    "separateDataRoot",
+    "scenarioManifest",
+    "scenarioCalendars",
+    "calendarWritebackAllowlist",
+    "cacheRebuildReport",
+    "statusEndpoint",
+    "staticScenarioAssets",
+)
+
 SHOWCASE_OVERLAY_GO_FILES = (
     "cmd/dashboard-control-server/showcase_mode.go",
     "cmd/dashboard-control-server/showcase_calendar_sandbox.go",
@@ -113,6 +124,7 @@ class Context:
     started: float
     build_id: str
     plan: PerformancePlan
+    showcase_runtime_mode: str = "unknown"
     lock: threading.Lock = dataclasses.field(default_factory=threading.Lock)
     timings: list[dict[str, int | str]] = dataclasses.field(default_factory=list)
 
@@ -359,9 +371,14 @@ def validate_manifest(ctx: Context) -> None:
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:-(?:test\.\d+|r[1-9]\d*))?", ctx.release_package_version):
         raise BuildFailure("", "Manifest", "releasePackageVersion must use X.Y.Z, X.Y.Z-rN, or X.Y.Z-test.N")
     if "releasePackageVersion" in ctx.manifest:
-        expected = re.escape(ctx.dashgo_version)
-        if not re.fullmatch(expected + r"(?:-r[1-9]\d*)?", ctx.release_package_version):
-            raise BuildFailure("", "Manifest", "stable releasePackageVersion must equal dashGoVersion or dashGoVersion-rN")
+        if "-beta." in ctx.dashgo_version:
+            numeric = ctx.dashgo_version.split("-beta.", 1)[0]
+            if not re.fullmatch(re.escape(numeric) + r"-test\.[1-9]\d*", ctx.release_package_version):
+                raise BuildFailure("", "Manifest", "beta native candidate releasePackageVersion must use Dash-Go numeric core plus -test.N")
+        else:
+            expected = re.escape(ctx.dashgo_version)
+            if not re.fullmatch(expected + r"(?:-r[1-9]\d*)?", ctx.release_package_version):
+                raise BuildFailure("", "Manifest", "stable releasePackageVersion must equal dashGoVersion or dashGoVersion-rN")
     if ctx.manifest.get("goToolchain") != "1.26.4":
         raise BuildFailure("", "Manifest", "this Builder requires Go 1.26.4")
     if str(ctx.manifest.get("dashGoSourceArchive")) != f"engine/Dash-Go_{ctx.dashgo_version}_source.tar.gz":
@@ -382,6 +399,44 @@ def source_privacy_sanity(ctx: Context) -> None:
             for token in forbidden:
                 if token.lower() in text.lower():
                     raise BuildFailure("", "Privacy audit", f"Studio-owned source contains prohibited private/default reference {token!r}: {path.relative_to(ctx.source)}")
+
+
+def native_showcase_contract(app: Path) -> dict | None:
+    path = app / "release" / "showcase-contract.json"
+    if not path.exists():
+        return None
+    if not path.is_file():
+        raise BuildFailure("Select Dash-Go Showcase runtime", "Native contract", "showcase-contract.json is not a regular file")
+    try:
+        contract = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise BuildFailure("Select Dash-Go Showcase runtime", "Native contract", f"cannot read Showcase contract: {exc}") from exc
+    if not isinstance(contract, dict) or contract.get("schema") != 1 or contract.get("contract") != NATIVE_SHOWCASE_CONTRACT:
+        raise BuildFailure("Select Dash-Go Showcase runtime", "Native contract", "Showcase contract is not dashgo-showcase/v1")
+    capabilities = contract.get("capabilities")
+    if not isinstance(capabilities, dict):
+        raise BuildFailure("Select Dash-Go Showcase runtime", "Native contract", "Showcase contract lacks a capabilities object")
+    for capability in NATIVE_SHOWCASE_CAPABILITIES:
+        if capabilities.get(capability) is not True:
+            raise BuildFailure("Select Dash-Go Showcase runtime", "Native contract", f"Showcase contract lacks required capability: {capability}")
+    return contract
+
+
+def verify_native_showcase_runtime_contract(app: Path, contract: dict) -> None:
+    phase_name = "Native Showcase Contract v1"
+    if contract.get("contract") != NATIVE_SHOWCASE_CONTRACT:
+        raise BuildFailure(phase_name, "Native contract", "unexpected native Showcase contract")
+    for relative in SHOWCASE_OVERLAY_GO_FILES:
+        if (app / relative).exists():
+            raise BuildFailure(phase_name, "Legacy bridge", f"native Showcase candidate must not carry legacy overlay source: {relative}")
+    required = (
+        "cmd/dashboard-control-server/showcase_contract.go",
+        "cmd/dashboard-control-server/showcase_contract_calendar.go",
+        "cmd/dashboard-control-server/showcase_contract_http.go",
+        "release/showcase-contract.json",
+    )
+    for relative in required:
+        need_file(app / relative, f"native Showcase contract source {relative}", phase_name)
 
 
 def verify_showcase_overlay_formatting(ctx: Context, app: Path) -> None:
@@ -407,7 +462,10 @@ def js_syntax_checks(ctx: Context, app: Path) -> None:
             future.result()
 
 
-def showcase_tour_guard_view_contract(ctx: Context, app: Path) -> None:
+def showcase_tour_guard_view_contract(ctx: Context, app: Path, native_contract: dict | None) -> None:
+    if native_contract is not None:
+        verify_native_showcase_runtime_contract(app, native_contract)
+        return
     phase_name = "Showcase Tour, guard, and viewport contract"
     js_manifest = json.loads((app / "ui/js/bundle.manifest.json").read_text(encoding="utf-8"))
     app_sources = js_manifest.get("bundles", {}).get("app")
@@ -864,7 +922,7 @@ def main() -> int:
             run(ctx, "Node verification", [ctx.node, "--version"], cwd=source, timeout=120)
             if "linux" in ctx.targets:
                 run(ctx, "dpkg-deb verification", ["dpkg-deb", "--version"], cwd=source, timeout=120)
-        with phase(ctx, 3, "Extract, patch, and format-check pinned Dash-Go runtime"):
+        with phase(ctx, 3, "Extract and select the pinned Dash-Go Showcase runtime"):
             archive = source / str(ctx.manifest["dashGoSourceArchive"])
             if sha256(archive) != str(ctx.manifest["dashGoSourceSha256"]):
                 raise BuildFailure("", "Input integrity", "pinned Dash-Go source archive SHA-256 mismatch")
@@ -873,28 +931,43 @@ def main() -> int:
             app = extract / ctx.dashgo_root / "app"
             need_file(app / "go.mod", "Dash-Go module", "")
             compatibility_report = work / "showcase-compatibility-report.json"
-            run(
-                ctx,
-                "Apply Dash-Go Showcase compatibility profile",
-                [
-                    sys.executable,
-                    str(source / "tools/apply_dashgo_compatibility.py"),
-                    "--source-root", str(source),
-                    "--app", str(app),
-                    "--source-archive", str(archive),
-                    "--source-sha256", str(ctx.manifest["dashGoSourceSha256"]),
-                    "--gofmt", str(Path(ctx.go).with_name("gofmt")),
-                    "--report", str(compatibility_report),
-                ],
-                cwd=source,
-                timeout=120,
-            )
-            verify_showcase_overlay_formatting(ctx, app)
+            native_contract = native_showcase_contract(app)
+            if native_contract is not None:
+                ctx.showcase_runtime_mode = "native-contract"
+                verify_native_showcase_runtime_contract(app, native_contract)
+                write_json(compatibility_report, {
+                    "schema": 3,
+                    "result": "PASS",
+                    "mode": "native-contract",
+                    "contract": NATIVE_SHOWCASE_CONTRACT,
+                    "dashGoVersion": ctx.dashgo_version,
+                    "legacyAdaptersApplied": False,
+                })
+                print(f"PASS: selected native Dash-Go Showcase contract for {ctx.dashgo_version}")
+            else:
+                ctx.showcase_runtime_mode = "legacy-bridge"
+                run(
+                    ctx,
+                    "Apply Dash-Go Showcase compatibility profile",
+                    [
+                        sys.executable,
+                        str(source / "tools/apply_dashgo_compatibility.py"),
+                        "--source-root", str(source),
+                        "--app", str(app),
+                        "--source-archive", str(archive),
+                        "--source-sha256", str(ctx.manifest["dashGoSourceSha256"]),
+                        "--gofmt", str(Path(ctx.go).with_name("gofmt")),
+                        "--report", str(compatibility_report),
+                    ],
+                    cwd=source,
+                    timeout=120,
+                )
+                verify_showcase_overlay_formatting(ctx, app)
         with phase(ctx, 4, "Generate and validate browser assets"):
             run(ctx, "Generate Dash-Go browser assets", [sys.executable, str(source / "tools/generate_dashgo_assets.py"), "--app", str(app)], cwd=source, timeout=240)
             run(ctx, "Verify Dash-Go browser assets", [sys.executable, str(source / "tools/generate_dashgo_assets.py"), "--app", str(app), "--verify"], cwd=source, timeout=240)
             js_syntax_checks(ctx, app)
-            showcase_tour_guard_view_contract(ctx, app)
+            showcase_tour_guard_view_contract(ctx, app, native_contract)
         with phase(ctx, 5, "Test Studio host and fixture contracts"):
             run(ctx, "Studio host tests", [ctx.go, "test", "-count=1", "-p", str(ctx.plan.test_p), "./..."], cwd=source, env=go_test_network_env(ctx), timeout=900)
         with phase(ctx, 6, "Validate patched Dash-Go runtime"):
@@ -974,7 +1047,7 @@ def main() -> int:
                 (root / "dash-go-showcase-studio").chmod(0o755)
                 run(ctx, "Showcase runtime self-test", [str(root / "dash-go-showcase-studio"), "--action", "self-test", "--scenario", str(ctx.manifest["defaultScenario"]), "--state-root", str(work / "smoke/runtime-state")], cwd=root, timeout=180)
         write_json(work / "timing.json", {"schema": 1, "performance": plan.as_json(), "phases": ctx.timings, "totalDurationMs": round((time.monotonic() - ctx.started) * 1000)})
-        summary = {"schema": 1, "result": "PASS", "buildID": ctx.build_id, "studioVersion": ctx.version, "releasePackageVersion": ctx.release_package_version, "dashGoVersion": ctx.dashgo_version, "targets": list(ctx.targets), "windowsStage": str(windows_stage) if windows_stage else "", "linuxDeb": str(linux_deb) if linux_deb else "", "events": str(ctx.events_path), "work": str(ctx.work), "performance": plan.as_json(), "timing": str(work / "timing.json"), "finishedAt": now_utc()}
+        summary = {"schema": 1, "result": "PASS", "buildID": ctx.build_id, "studioVersion": ctx.version, "releasePackageVersion": ctx.release_package_version, "dashGoVersion": ctx.dashgo_version, "showcaseRuntimeMode": ctx.showcase_runtime_mode, "targets": list(ctx.targets), "windowsStage": str(windows_stage) if windows_stage else "", "linuxDeb": str(linux_deb) if linux_deb else "", "events": str(ctx.events_path), "work": str(ctx.work), "performance": plan.as_json(), "timing": str(work / "timing.json"), "finishedAt": now_utc()}
         write_json(work / "summary.json", summary)
         run_state = json.loads((work / "run.json").read_text(encoding="utf-8"))
         run_state.update({"status": "passed", "finishedAt": now_utc()})

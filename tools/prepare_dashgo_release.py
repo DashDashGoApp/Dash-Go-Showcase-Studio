@@ -23,6 +23,17 @@ USER_AGENT = "Dash-Go-Showcase-Studio-Stage"
 MANUAL_PURPOSE = "manual package candidate only"
 STABLE_PURPOSE = "stable release package candidate only"
 DRAFT_PREPUBLICATION_PURPOSE = "draft prepublication package candidate only"
+BETA_NATIVE_PURPOSE = "beta release native contract candidate only"
+NATIVE_SHOWCASE_CONTRACT = "dashgo-showcase/v1"
+NATIVE_SHOWCASE_CAPABILITIES = (
+    "separateDataRoot",
+    "scenarioManifest",
+    "scenarioCalendars",
+    "calendarWritebackAllowlist",
+    "cacheRebuildReport",
+    "statusEndpoint",
+    "staticScenarioAssets",
+)
 
 
 class ReleaseInputError(RuntimeError):
@@ -73,6 +84,12 @@ def require_commit(value: str, label: str) -> str:
 def require_stable_version(value: str) -> str:
     if not re.fullmatch(r"\d+\.\d+\.\d+", value):
         raise ReleaseInputError("Dash-Go stable version must use X.Y.Z")
+    return value
+
+
+def require_beta_version(value: str) -> str:
+    if not re.fullmatch(r"\d+\.\d+\.\d+-beta\.[1-9][0-9]*", value):
+        raise ReleaseInputError("Dash-Go beta version must use X.Y.Z-beta.N")
     return value
 
 
@@ -152,7 +169,20 @@ def resolve_tag_commit(api: str, tag: str) -> str:
     raise ReleaseInputError("annotated Git tag nesting exceeds the supported limit")
 
 
-def validate_archive(archive: Path, version: str) -> None:
+def validate_native_showcase_contract(payload: object) -> None:
+    if not isinstance(payload, dict):
+        raise ReleaseInputError("Dash-Go Showcase contract must be a JSON object")
+    if payload.get("schema") != 1 or payload.get("contract") != NATIVE_SHOWCASE_CONTRACT:
+        raise ReleaseInputError("Dash-Go Showcase contract is not dashgo-showcase/v1")
+    capabilities = payload.get("capabilities")
+    if not isinstance(capabilities, dict):
+        raise ReleaseInputError("Dash-Go Showcase contract lacks capabilities")
+    for capability in NATIVE_SHOWCASE_CAPABILITIES:
+        if capabilities.get(capability) is not True:
+            raise ReleaseInputError(f"Dash-Go Showcase contract lacks required capability: {capability}")
+
+
+def validate_archive(archive: Path, version: str, track: str, *, require_native_contract: bool = False) -> None:
     expected_root = f"dash-go-source-{version}"
     expected = {
         f"{expected_root}/app/VERSION",
@@ -160,6 +190,9 @@ def validate_archive(archive: Path, version: str) -> None:
         f"{expected_root}/app/cmd/dashboard-control-server/main.go",
         f"{expected_root}/app/ui/js/bundle.manifest.json",
     }
+    native_contract_name = f"{expected_root}/app/release/showcase-contract.json"
+    if require_native_contract:
+        expected.add(native_contract_name)
     try:
         with tarfile.open(archive, "r:gz") as tar:
             names: set[str] = set()
@@ -180,12 +213,17 @@ def validate_archive(archive: Path, version: str) -> None:
                 raise ReleaseInputError("Dash-Go source archive cannot read release contract")
             archive_version = version_file.read().decode("utf-8").strip()
             release_contract = json.loads(release_file.read().decode("utf-8"))
+            if require_native_contract:
+                contract_file = tar.extractfile(native_contract_name)
+                if contract_file is None:
+                    raise ReleaseInputError("Dash-Go source archive cannot read Showcase contract")
+                validate_native_showcase_contract(json.loads(contract_file.read().decode("utf-8")))
     except tarfile.TarError as exc:
         raise ReleaseInputError(f"could not read Dash-Go source archive: {exc}") from exc
     if archive_version != version:
         raise ReleaseInputError(f"Dash-Go app/VERSION mismatch: expected {version}, found {archive_version!r}")
-    if release_contract.get("version") != version or release_contract.get("track") != "stable":
-        raise ReleaseInputError("Dash-Go release/release.json is not the expected stable release contract")
+    if release_contract.get("version") != version or release_contract.get("track") != track:
+        raise ReleaseInputError(f"Dash-Go release/release.json is not the expected {track} release contract")
 
 
 def parse_sums(path: Path, source_name: str) -> str:
@@ -213,6 +251,14 @@ def require_prepublication_package_version(value: str, dashgo_version: str) -> s
     package_version = require_string(value, "prepublication release package version")
     if package_version != dashgo_version:
         raise ReleaseInputError("prepublication release package version must exactly equal the Dash-Go stable version")
+    return package_version
+
+
+def require_beta_package_version(value: str, dashgo_version: str) -> str:
+    package_version = require_string(value, "beta native candidate package version")
+    numeric = dashgo_version.split("-beta.", 1)[0]
+    if not re.fullmatch(re.escape(numeric) + r"-test\.[1-9][0-9]*", package_version):
+        raise ReleaseInputError("beta native candidate package version must use the Dash-Go numeric core plus -test.N")
     return package_version
 
 
@@ -247,6 +293,8 @@ def materialize_source_archive(
     sums_digest: str,
     source_url: str,
     sums_url: str,
+    track: str,
+    require_native_contract: bool = False,
 ) -> None:
     archive_target = source_root / "engine" / source_name
     archive_target.parent.mkdir(parents=True, exist_ok=True)
@@ -262,7 +310,7 @@ def materialize_source_archive(
             raise ReleaseInputError("downloaded SHA256SUMS does not match GitHub asset digest")
         if parse_sums(downloaded_sums, source_name) != source_digest:
             raise ReleaseInputError("SHA256SUMS source row does not match the GitHub source asset digest")
-        validate_archive(downloaded_source, version)
+        validate_archive(downloaded_source, version, track, require_native_contract=require_native_contract)
         stage = archive_target.with_name("." + archive_target.name + ".stage")
         shutil.copy2(downloaded_source, stage)
         if sha256(stage) != source_digest:
@@ -284,7 +332,7 @@ def main() -> int:
     parser.add_argument("--origin-path", type=Path, required=True)
     parser.add_argument(
         "--candidate-origin",
-        choices=("manual", "dashgo-stable-release", "dashgo-draft-prepublish-release"),
+        choices=("manual", "dashgo-stable-release", "dashgo-beta-release", "dashgo-draft-prepublish-release"),
         required=True,
     )
     parser.add_argument("--dashgo-release-id", default="")
@@ -340,12 +388,18 @@ def main() -> int:
         return 0
 
     tag = require_string(args.dashgo_release_tag, "Dash-Go release tag")
-    version = require_stable_version(require_string(args.dashgo_version, "Dash-Go version"))
+    raw_version = require_string(args.dashgo_version, "Dash-Go version")
+    if args.candidate_origin == "dashgo-stable-release":
+        version = require_stable_version(raw_version)
+    elif args.candidate_origin == "dashgo-beta-release":
+        version = require_beta_version(raw_version)
+    else:
+        version = require_stable_version(raw_version)
     expected_source_hash = require_sha256(require_string(args.dashgo_source_sha256, "Dash-Go source SHA-256"), "Dash-Go source SHA-256")
     expected_tag_commit = require_commit(require_string(args.dashgo_tag_commit, "Dash-Go tag commit"), "Dash-Go tag commit")
     nonce = require_string(args.dispatch_nonce, "dispatch nonce")
     if tag != f"v{version}":
-        raise ReleaseInputError("Dash-Go release tag must exactly match the stable version")
+        raise ReleaseInputError("Dash-Go release tag must exactly match the requested version")
     if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._-]{7,127}", nonce):
         raise ReleaseInputError("dispatch nonce must be 8-128 ASCII letters, digits, dots, underscores, or dashes")
 
@@ -355,12 +409,20 @@ def main() -> int:
 
     source_name = f"Dash-Go_{version}_source.tar.gz"
 
-    if args.candidate_origin == "dashgo-stable-release":
+    if args.candidate_origin in ("dashgo-stable-release", "dashgo-beta-release"):
         if args.dashgo_release_id or args.dashgo_source_asset_id or args.dashgo_sha256sums_asset_id:
-            raise ReleaseInputError("stable-release Stage input must not supply draft prepublication asset identity fields")
-        release_package_version = require_release_package_version(args.release_package_version, version)
+            raise ReleaseInputError("published-release Stage input must not supply draft prepublication asset identity fields")
+        beta_native = args.candidate_origin == "dashgo-beta-release"
+        release_package_version = (
+            require_beta_package_version(args.release_package_version, version)
+            if beta_native
+            else require_release_package_version(args.release_package_version, version)
+        )
         release = get_json(f"{api}/repos/{DASHGO_REPOSITORY}/releases/tags/{urllib.parse.quote(tag, safe='')}")
-        if release.get("tag_name") != tag or release.get("draft") or release.get("prerelease") or release.get("immutable") is not True:
+        if beta_native:
+            if release.get("tag_name") != tag or release.get("draft") or release.get("prerelease") is not True or release.get("immutable") is not True:
+                raise ReleaseInputError("Dash-Go release is not the expected published immutable beta release")
+        elif release.get("tag_name") != tag or release.get("draft") or release.get("prerelease") or release.get("immutable") is not True:
             raise ReleaseInputError("Dash-Go release is not the expected published immutable stable release")
         release_id = require_positive_int(release.get("id"), "immutable Dash-Go release id")
         published_at = release.get("published_at")
@@ -383,11 +445,13 @@ def main() -> int:
             sums_digest=sums_digest,
             source_url=require_api_url(source_asset.get("browser_download_url"), "published source browser download URL"),
             sums_url=require_api_url(sums_asset.get("browser_download_url"), "published SHA256SUMS browser download URL"),
+            track="beta" if beta_native else "stable",
+            require_native_contract=beta_native,
         )
         update_manifest(source_root, version, source_digest, release_package_version)
         common.update(
             {
-                "purpose": STABLE_PURPOSE,
+                "purpose": BETA_NATIVE_PURPOSE if beta_native else STABLE_PURPOSE,
                 "dashGoVersion": version,
                 "releasePackageVersion": release_package_version,
                 "dashGoSourceSha256": source_digest,
@@ -398,6 +462,8 @@ def main() -> int:
                     "releaseID": release_id,
                     "publishedAt": published_at,
                     "immutable": True,
+                    "prerelease": beta_native,
+                    "track": "beta" if beta_native else "stable",
                     "tagCommit": resolved_commit,
                     "dispatchNonce": nonce,
                     "sourceAsset": {
@@ -414,7 +480,8 @@ def main() -> int:
             }
         )
         write_json(origin_path, common)
-        print(f"STUDIO CANDIDATE INPUT: immutable Dash-Go stable release {tag} ({source_digest})")
+        kind = "beta native-contract" if beta_native else "stable"
+        print(f"STUDIO CANDIDATE INPUT: immutable Dash-Go {kind} release {tag} ({source_digest})")
         return 0
 
     release_id = require_positive_int_string(args.dashgo_release_id, "Dash-Go draft release id")
@@ -449,6 +516,7 @@ def main() -> int:
         sums_digest=sums_digest,
         source_url=require_api_url(source_asset.get("url"), "draft source asset API URL"),
         sums_url=require_api_url(sums_asset.get("url"), "draft SHA256SUMS asset API URL"),
+        track="stable",
     )
     update_manifest(source_root, version, source_digest, release_package_version)
     common.update(

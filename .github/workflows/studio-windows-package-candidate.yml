@@ -171,17 +171,18 @@ jobs:
           if ($releasePackageVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-(?:test\.[0-9]+|r[1-9][0-9]*))?$') {
               throw "Stage Candidate provenance has an invalid releasePackageVersion: '$releasePackageVersion'."
           }
-          $allowedPurposes = @('manual package candidate only', 'stable release package candidate only')
+          $allowedPurposes = @('manual package candidate only', 'stable release package candidate only', 'beta release native contract candidate only')
           if ($allowedPurposes -notcontains $provenancePurpose) {
               throw "Stage Candidate provenance has an unexpected purpose: '$provenancePurpose'."
           }
           if (($provenancePurpose -eq 'manual package candidate only' -and $candidateOrigin -ne 'manual') -or
-              ($provenancePurpose -eq 'stable release package candidate only' -and $candidateOrigin -ne 'dashgo-stable-release')) {
+              ($provenancePurpose -eq 'stable release package candidate only' -and $candidateOrigin -ne 'dashgo-stable-release') -or
+              ($provenancePurpose -eq 'beta release native contract candidate only' -and $candidateOrigin -ne 'dashgo-beta-release')) {
               throw 'Stage Candidate provenance purpose and candidate origin do not agree.'
           }
 
           $dashGoRelease = $null
-          if ($provenancePurpose -eq 'stable release package candidate only') {
+          if ($provenancePurpose -in @('stable release package candidate only', 'beta release native contract candidate only')) {
               $dashGoRelease = Get-RequiredObjectProperty -Object $provenance -Name 'dashGoRelease' -Label 'dashGoRelease'
               $releaseRepository = Get-RequiredObjectString -Object $dashGoRelease -Name 'repository' -Label 'dashGoRelease.repository'
               $releaseVersion = Get-RequiredObjectString -Object $dashGoRelease -Name 'version' -Label 'dashGoRelease.version'
@@ -200,19 +201,27 @@ jobs:
               if ($releaseRepository -ne 'DashDashGoApp/Dash-Go' -or
                   $releaseVersion -ne $provenanceDashGoVersion -or
                   $releaseTag -ne ('v{0}' -f $releaseVersion)) {
-                  throw 'Stable-release candidate provenance does not identify the expected Dash-Go release.'
+                  throw 'Release candidate provenance does not identify the expected Dash-Go release.'
               }
               if ($releaseImmutable -ne $true -or $releaseCommit -notmatch '^[0-9A-Fa-f]{40}$') {
-                  throw 'Stable-release candidate provenance does not prove an immutable tagged Dash-Go commit.'
+                  throw 'Release candidate provenance does not prove an immutable tagged Dash-Go commit.'
               }
               if ($sourceAssetName -ne ('Dash-Go_{0}_source.tar.gz' -f $releaseVersion) -or
                   $sumsAssetName -ne 'SHA256SUMS') {
-                  throw 'Stable-release candidate provenance has unexpected Dash-Go release asset names.'
+                  throw 'Release candidate provenance has unexpected Dash-Go release asset names.'
               }
               if ($sourceAssetSha -notmatch '^[0-9A-Fa-f]{64}$' -or
                   $sumsAssetSha -notmatch '^[0-9A-Fa-f]{64}$' -or
                   $sourceAssetSha.ToLowerInvariant() -ne $provenanceDashGoSha.ToLowerInvariant()) {
-                  throw 'Stable-release candidate provenance has invalid or mismatched Dash-Go SHA-256 evidence.'
+                  throw 'Release candidate provenance has invalid or mismatched Dash-Go SHA-256 evidence.'
+              }
+              if ($provenancePurpose -eq 'beta release native contract candidate only') {
+                  if ($dashGoRelease.prerelease -ne $true -or [string]$dashGoRelease.track -ne 'beta') {
+                      throw 'Beta candidate provenance does not prove an immutable published beta release.'
+                  }
+                  if ([string]$provenance.showcaseRuntimeMode -ne 'native-contract' -or [string]$provenance.nativeShowcaseContract -ne 'dashgo-showcase/v1') {
+                      throw 'Beta candidate provenance does not prove the native Showcase Contract v1 path.'
+                  }
               }
           }
 
@@ -380,7 +389,12 @@ jobs:
           $expectedWindowsPurpose = switch ($env:CANDIDATE_ORIGIN) {
               'manual' { 'manual Windows package candidate only' }
               'dashgo-stable-release' { 'stable release Windows package candidate only' }
+              'dashgo-beta-release' { 'beta native contract Windows package candidate only' }
               default { throw "Unexpected candidate origin '$env:CANDIDATE_ORIGIN'." }
+          }
+          if ($env:CANDIDATE_ORIGIN -eq 'dashgo-beta-release' -and
+              ([string]$stageProvenance.showcaseRuntimeMode -ne 'native-contract' -or [string]$stageProvenance.nativeShowcaseContract -ne 'dashgo-showcase/v1')) {
+              throw 'Windows beta candidate must inherit native Showcase Contract v1 evidence from Stage.'
           }
           if ($env:CANDIDATE_PURPOSE -ne [string]$stageProvenance.purpose -or
               $env:CANDIDATE_ORIGIN -ne [string]$stageProvenance.candidateOrigin) {
@@ -405,6 +419,8 @@ jobs:
               payloadManifestSha256 = [string]$packageSummary.payloadManifestSha256
               payloadFileCount = [int]$packageSummary.payloadFileCount
               dashGoSourceSha256 = [string]$stageProvenance.dashGoSourceSha256
+              showcaseRuntimeMode = [string]$stageProvenance.showcaseRuntimeMode
+              nativeShowcaseContract = [string]$stageProvenance.nativeShowcaseContract
               dashGoRelease = $stageProvenance.dashGoRelease
               innoVersion = $env:INNO_VERSION
           } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputRoot 'windows-package-provenance.json') -Encoding utf8

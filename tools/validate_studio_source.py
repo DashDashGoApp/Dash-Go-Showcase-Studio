@@ -35,7 +35,7 @@ def assert_stage_packager_syntax_and_r7_phase(root: Path) -> None:
     lines = text.splitlines()
     bridge = [index for index, line in enumerate(lines) if '"Apply Dash-Go Showcase compatibility profile"' in line]
     if len(bridge) != 1:
-        raise CheckError("ci/stage-package.py must contain exactly one central Showcase compatibility invocation")
+        raise CheckError("ci/stage-package.py must contain exactly one legacy Showcase compatibility invocation")
     bridge_indent = len(lines[bridge[0]]) - len(lines[bridge[0]].lstrip(" \t"))
     if not bridge_indent:
         raise CheckError("ci/stage-package.py central Showcase compatibility invocation must remain nested in phase 3")
@@ -52,9 +52,13 @@ def assert_stage_packager_syntax_and_r7_phase(root: Path) -> None:
         "--source-sha256",
         "--gofmt",
         "--report",
+        "native_showcase_contract",
+        "verify_native_showcase_runtime_contract",
+        "legacyAdaptersApplied",
+        "showcaseRuntimeMode",
     ):
         if token not in text:
-            raise CheckError(f"ci/stage-package.py central Showcase compatibility invocation is missing: {token}")
+            raise CheckError(f"ci/stage-package.py Showcase runtime selection is missing: {token}")
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -99,7 +103,7 @@ def main() -> int:
         "internal/fixtures/fixtures.go", "tools/patch_dashgo_engine.py", "tools/patch_dashgo_r7.py", "tools/apply_dashgo_compatibility.py", "tools/dashgo_compatibility.json", "tools/test_dashgo_compatibility.py", "tools/generate_dashgo_assets.py",
         "tools/refresh_dashgo_baseline.py", "tools/prepare_dashgo_release.py",
         "tools/run_legacy_bridge_candidate.py", "tools/test_run_legacy_bridge_candidate.py",
-        "tools/validate_studio_legacy_bridge_candidate.py",
+        "tools/validate_studio_legacy_bridge_candidate.py", "tools/validate_studio_native_contract_beta.py", "tools/test_prepare_dashgo_release_beta.py",
         "tools/validate_studio_prepublication_bridge.py", "tools/test_prepare_dashgo_release_prepublication.py",
         ".github/workflows/studio-prepublish-candidate.yml",
         ".github/workflows/studio-legacy-bridge-candidate.yml", "PREPUBLICATION_CANDIDATE_INTAKE.md",

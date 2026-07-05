@@ -72,7 +72,7 @@ def main() -> int:
         "validate_archive",
         "git/ref/tags",
         "Dash-Go source archive root must be exactly",
-        "Dash-Go release/release.json is not the expected stable release contract",
+        "Dash-Go release/release.json is not the expected {track} release contract",
         "release-package-version",
         "releasePackageVersion",
     )

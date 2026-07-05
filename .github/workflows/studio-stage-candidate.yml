@@ -4,35 +4,36 @@ on:
   workflow_dispatch:
     inputs:
       candidate_origin:
-        description: "Candidate source: manual pinned baseline or immutable Dash-Go stable release"
+        description: "Candidate source: manual pinned baseline, immutable Dash-Go stable release, or immutable native-contract beta release"
         required: false
         default: manual
         type: choice
         options:
           - manual
           - dashgo-stable-release
+          - dashgo-beta-release
       dashgo_release_tag:
-        description: Exact published immutable Dash-Go stable release tag (stable-release only)
+        description: Exact published immutable Dash-Go release tag (stable or beta release only)
         required: false
         type: string
       dashgo_version:
-        description: Exact Dash-Go stable version without v (stable-release only)
+        description: Exact Dash-Go version without v (stable or beta release only)
         required: false
         type: string
       dashgo_source_sha256:
-        description: Exact SHA-256 of Dash-Go source release asset (stable-release only)
+        description: Exact SHA-256 of Dash-Go source release asset (stable or beta release only)
         required: false
         type: string
       dashgo_tag_commit:
-        description: Exact commit reached by the immutable Dash-Go release tag (stable-release only)
+        description: Exact commit reached by the immutable Dash-Go release tag (stable or beta release only)
         required: false
         type: string
       dispatch_nonce:
-        description: Unique Publisher dispatch correlation nonce (stable-release only)
+        description: Unique dispatch correlation nonce (stable or beta release only)
         required: false
         type: string
       release_package_version:
-        description: Public Studio package identity (stable-release only; defaults to Dash-Go version, or Dash-Go X.Y.Z-rN for a controlled reissue)
+        description: Studio package identity: stable accepts Dash-Go X.Y.Z or X.Y.Z-rN; native beta accepts numeric core plus -test.N
         required: false
         type: string
 
@@ -86,6 +87,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/validate_studio_stable_release_bridge.py --root .
+          python3 tools/validate_studio_native_contract_beta.py --root .
+          python3 tools/test_prepare_dashgo_release_beta.py
 
       - name: Materialize isolated candidate source
         id: candidate

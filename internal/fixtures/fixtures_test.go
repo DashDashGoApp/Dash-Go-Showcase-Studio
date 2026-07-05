@@ -130,11 +130,12 @@ func TestRealityLayerSeedsSevenBrowserCalendarsAndSessionWriteback(t *testing.T)
 	if err := decoder.Decode(&writeback); err != nil {
 		t.Fatalf("parse strict calendar writeback registry: %v", err)
 	}
-	if writeback.Version != 2 || !writeback.Enabled || writeback.RequirePIN || len(writeback.Calendars) != 3 {
+	if writeback.Version != 2 || !writeback.Enabled || writeback.RequirePIN || len(writeback.Calendars) != 4 {
 		t.Fatalf("unexpected Studio writeback registry: %#v", writeback)
 	}
 	wantWritable := map[string]string{
 		"calendars/family.green.ics": filepath.Join(home, ".dashboard-vdirsyncer", "collections", "showcase-family.green"),
+		"calendars/school.blue.ics":  filepath.Join(home, ".dashboard-vdirsyncer", "collections", "showcase-school.blue"),
 		"calendars/home.amber.ics":   filepath.Join(home, ".dashboard-vdirsyncer", "collections", "showcase-home.amber"),
 		"calendars/plans.violet.ics": filepath.Join(home, ".dashboard-vdirsyncer", "collections", "showcase-plans.violet"),
 	}
@@ -165,8 +166,25 @@ func TestRealityLayerSeedsSevenBrowserCalendarsAndSessionWriteback(t *testing.T)
 	if err := json.Unmarshal(sessionBytes, &sessionMeta); err != nil {
 		t.Fatalf("parse Studio session calendar metadata: %v", err)
 	}
-	if sessionMeta.Schema != 1 || !sessionMeta.SessionOnly || !sessionMeta.ResetsOnClose || len(sessionMeta.WritableSources) != 3 {
+	if sessionMeta.Schema != 1 || !sessionMeta.SessionOnly || !sessionMeta.ResetsOnClose || len(sessionMeta.WritableSources) != 4 {
 		t.Fatalf("unexpected Studio session calendar metadata: %#v", sessionMeta)
+	}
+	expectedSessionSources := map[string]bool{
+		"calendars/family.green.ics": false,
+		"calendars/school.blue.ics":  false,
+		"calendars/home.amber.ics":   false,
+		"calendars/plans.violet.ics": false,
+	}
+	for _, source := range sessionMeta.WritableSources {
+		if _, ok := expectedSessionSources[source]; !ok {
+			t.Fatalf("unexpected Studio session calendar source: %q", source)
+		}
+		expectedSessionSources[source] = true
+	}
+	for source, present := range expectedSessionSources {
+		if !present {
+			t.Fatalf("Studio session calendar metadata is missing: %s", source)
+		}
 	}
 
 	if _, err := os.Stat(filepath.Join(home, ".dashboard-family-board.json")); err != nil {

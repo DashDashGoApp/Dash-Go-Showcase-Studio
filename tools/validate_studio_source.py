@@ -61,7 +61,7 @@ def main() -> int:
         print("NOTE: ignored local Python cache artifacts (not part of source handoff or package): " + ", ".join(sorted(caches)[:8]))
     for relative in (
         "go.mod", "cmd/dash-go-showcase-studio/main.go", "internal/studiohost/runtime.go", "internal/studiohost/app.go",
-        "internal/fixtures/fixtures.go", "tools/patch_dashgo_engine.py", "tools/generate_dashgo_assets.py",
+        "internal/fixtures/fixtures.go", "tools/patch_dashgo_engine.py", "tools/patch_dashgo_r7.py", "tools/generate_dashgo_assets.py",
         "tools/refresh_dashgo_baseline.py", "tools/prepare_dashgo_release.py",
         "tools/validate_studio_prepublication_bridge.py", "tools/test_prepare_dashgo_release_prepublication.py",
         ".github/workflows/studio-prepublish-candidate.yml", "PREPUBLICATION_CANDIDATE_INTAKE.md",
@@ -111,6 +111,7 @@ def main() -> int:
     hub_js = (root / "internal/studiohost/web/hub.js").read_text(encoding="utf-8")
     fixtures = (root / "internal/fixtures/fixtures.go").read_text(encoding="utf-8")
     patcher = (root / "tools/patch_dashgo_engine.py").read_text(encoding="utf-8")
+    r7_patcher = (root / "tools/patch_dashgo_r7.py").read_text(encoding="utf-8")
     stage_packager = (root / "ci/stage-package.py").read_text(encoding="utf-8")
     for token in ("case \"purge\"", "func (a *App) purge() error", "validatePurgeRequest", "requireRuntime := normalized.Action != \"clean\" && normalized.Action != \"purge\""):
         if token not in host_app:
@@ -173,6 +174,8 @@ def main() -> int:
         "Browser.getWindowForTarget",
         "Browser.setWindowBounds",
         "Browser.setContentsSize",
+        "fitPreviewContents",
+        "Presentation Fit",
         "wall-landscape",
         "laptop",
         "wide-tablet",
@@ -185,6 +188,9 @@ def main() -> int:
     ):
         if token not in host_browser:
             raise CheckError(f"Studio browser viewport contract is missing: {token}")
+    for token in ("calendars/school.blue.ics", "Studio session calendars", "showcase-dashboard-control-open", "dashgo:control-loaded"):
+        if token not in r7_patcher:
+            raise CheckError(f"Showcase r7 overlay contract is missing: {token}")
     for retired in ("compact-touch", "compact-portrait"):
         if retired in host_browser:
             raise CheckError(f"Studio browser viewport contract still exposes retired live preset: {retired}")
@@ -196,7 +202,7 @@ def main() -> int:
         '\\t\\t\\t\\"ui/js/showcase-tour.js\\",\\n', '\\t\\t\\t\\"ui/js/showcase-view.js\\",\\n',
         "openOnly", "clearPrimarySurface", "dashboardListsDockEnable", "dashboardListsDockDisable", "Sample Weather Alert — Studio Preview",
         "studio_location_locked", "Ah ah ah, you didn’t say the magic word.", "showcaseGeocode", "showcaseRestrictedPost", "showcaseRestrictedGet",
-        "Clean View", "Fit Display", "Wall Display", "Common Laptop", "16:10 Display", "Portrait Wall", "Portrait Tablet", "4:3 Portrait",
+        "Clean View", "Wall Display", "Common Laptop", "16:10 Display", "Portrait Wall", "Portrait Tablet", "4:3 Portrait",
     ):
         if token not in patcher:
             raise CheckError(f"Staged Dash-Go Studio contract is missing: {token}")

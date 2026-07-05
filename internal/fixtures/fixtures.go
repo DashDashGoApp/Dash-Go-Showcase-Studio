@@ -197,7 +197,7 @@ func person(id, name string, created time.Time) map[string]any {
 func seedBoard(home string, now time.Time, profile LocationProfile) error {
 	board := map[string]any{"schema": 3, "settings": map[string]any{"showUrgentAlertsOnDashboard": true}, "notes": []any{
 		map[string]any{"id": "board-urgent", "text": fmt.Sprintf("Weather plan: check the forecast before the park stop near %s.", profile.Park), "scope": "household", "priority": "urgent", "state": "active", "pinned": false, "createdAt": now.Add(-15 * time.Minute).Format(time.RFC3339), "updatedAt": now.Add(-15 * time.Minute).Format(time.RFC3339), "expiresAt": now.Add(48 * time.Hour).Format(time.RFC3339)},
-		map[string]any{"id": "board-pinned", "text": "Calendar demo note: Family, Home, and Plans events can be added or managed in this Studio session. Those changes reset when Studio closes.", "scope": "household", "priority": "normal", "state": "active", "pinned": true, "createdAt": now.Add(-time.Hour).Format(time.RFC3339), "updatedAt": now.Add(-30 * time.Minute).Format(time.RFC3339), "expiresAt": ""},
+		map[string]any{"id": "board-pinned", "text": "Calendar demo note: Family, School, Home, and Plans events can be added or managed in this Studio session. Those changes reset when Studio closes.", "scope": "household", "priority": "normal", "state": "active", "pinned": true, "createdAt": now.Add(-time.Hour).Format(time.RFC3339), "updatedAt": now.Add(-30 * time.Minute).Format(time.RFC3339), "expiresAt": ""},
 		map[string]any{"id": "board-trip", "text": "For the next family weekend, check the packing list, charge the camera, and confirm the sitter before Friday.", "scope": "household", "priority": "normal", "state": "active", "pinned": false, "createdAt": now.Add(-2 * time.Hour).Format(time.RFC3339), "updatedAt": now.Add(-2 * time.Hour).Format(time.RFC3339), "expiresAt": now.AddDate(0, 0, 14).Format(time.RFC3339)},
 		map[string]any{"id": "direct-avery-jordan", "text": "I saved the library books by the door for tomorrow.", "scope": "direct", "priority": "normal", "state": "active", "senderPersonId": "avery", "senderNameSnapshot": "Avery", "recipientPersonId": "jordan", "recipientNameSnapshot": "Jordan", "recipientReadAt": "", "createdAt": now.Add(-7 * time.Minute).Format(time.RFC3339), "updatedAt": now.Add(-7 * time.Minute).Format(time.RFC3339)},
 		map[string]any{"id": "direct-sam-avery", "text": "Can we make tacos after the market this weekend?", "scope": "direct", "priority": "normal", "state": "active", "senderPersonId": "sam", "senderNameSnapshot": "Sam", "recipientPersonId": "avery", "recipientNameSnapshot": "Avery", "recipientReadAt": "", "createdAt": now.Add(-3 * time.Minute).Format(time.RFC3339), "updatedAt": now.Add(-3 * time.Minute).Format(time.RFC3339)},
@@ -338,7 +338,7 @@ func seedMessages(config string, now time.Time, scenario string, profile Locatio
 		map[string]any{"id": 1, "text": "A shared calendar works best when daily plans, chores, and notes tell the same story.", "weight": 45, "origin": "studio-normal"},
 		map[string]any{"id": 2, "text": "Small household wins add up — one helpful task and one clear plan at a time.", "weight": 45, "origin": "studio-normal"},
 		map[string]any{"id": 3, "text": fmt.Sprintf("Today’s Studio household is centered on %s, %s.", profile.City, profile.Region), "weight": 20, "origin": "studio-location"},
-		map[string]any{"id": 4, "text": "Try adding an event to Family, Home, or Plans. Studio saves it locally for this session only.", "weight": 10, "origin": "studio-discovery"},
+		map[string]any{"id": 4, "text": "Try adding an event to Family, School, Home, or Plans. Studio saves it locally for this session only.", "weight": 10, "origin": "studio-discovery"},
 		map[string]any{"id": 5, "text": "Open a location-bearing event to see its map preview and practical notes.", "weight": 10, "origin": "studio-discovery"},
 		map[string]any{"id": 6, "text": "This is Dash-Go Showcase Studio. Everything here is synthetic, safe to explore, and reset automatically.", "weight": 10, "origin": "studio-discovery"},
 	}
@@ -496,6 +496,7 @@ func seedSessionWriteback(config, home string, today time.Time, fixtures []showc
 		"schema": 1, "sessionOnly": true, "resetsOnClose": true,
 		"writableSources": []string{
 			"calendars/family.green.ics",
+			"calendars/school.blue.ics",
 			"calendars/home.amber.ics",
 			"calendars/plans.violet.ics",
 		},
@@ -528,7 +529,7 @@ func showcaseCalendars(scenario string, today time.Time, loc *time.Location, pro
 		occurrenceOverride("family-piano", "Piano practice — moved", at(nextWeekday(base.AddDate(0, 0, 7), time.Wednesday), 17, 30), at(nextWeekday(base.AddDate(0, 0, 7), time.Thursday), 18, 0), at(nextWeekday(base.AddDate(0, 0, 7), time.Thursday), 18, 30), profile.CommunityVenue, "The instructor moved this one practice to Thursday. Keep the same music folder and arrive ten minutes early."),
 	}}
 
-	school := showcaseCalendarFixture{File: "school.blue.ics", Name: "School", Color: "#8bb4d4", Events: schoolCalendarEvents(base, pastStart, futureEnd, profile)}
+	school := showcaseCalendarFixture{File: "school.blue.ics", Name: "School", Color: "#8bb4d4", Editable: true, Events: schoolCalendarEvents(base, pastStart, futureEnd, profile)}
 
 	home := showcaseCalendarFixture{File: "home.amber.ics", Name: "Home", Color: "#cda76a", Editable: true, Events: []showcaseCalendarEvent{
 		recurringShowcaseEvent("home-set-out-bins", "Set out trash and recycling", at(firstMonday, 19, 0), at(firstMonday, 19, 15), "Home", "Move the bins to the curb after dinner. Put out the blue recycling bin on the alternating collection weeks shown below.", "FREQ=WEEKLY;BYDAY=MO;COUNT=38"),

@@ -65,6 +65,26 @@ def append_once(path: Path, marker: str, addition: str) -> None:
 def apply(app: Path) -> None:
     cmd = app / "cmd/dashboard-control-server"
     platform = app / "internal/platform"
+    fileio = app / "internal/fileio/fileio.go"
+    replace_once(
+        fileio,
+        '\t"errors"\n\t"os"\n',
+        '\t"errors"\n\t"os"\n\t"runtime"\n',
+    )
+    replace_once(
+        fileio,
+        '''func syncDirectory(dir string) error {
+\thandle, err := os.Open(dir)
+''',
+        '''func syncDirectory(dir string) error {
+\t// Showcase Windows directory-sync contract: Windows has no POSIX-style directory fsync. The file itself was already
+\t// synced and atomically renamed before this best-effort durability step.
+\tif runtime.GOOS == "windows" {
+\t\treturn nil
+\t}
+\thandle, err := os.Open(dir)
+''',
+    )
 
     action_history = cmd / "action_history.go"
     remove_import(action_history, '\t"syscall"\n')

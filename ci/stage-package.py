@@ -22,6 +22,17 @@ import time
 import traceback
 from pathlib import Path
 
+SOURCE_ROOT = Path(__file__).resolve().parents[1]
+if str(SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SOURCE_ROOT))
+
+from tools.showcase_runtime_contract import (
+    RuntimeContractMatrixError,
+    load_runtime_contract_matrix,
+    native_contract_error_message,
+    native_contract_name,
+)
+
 sys.dont_write_bytecode = True
 
 WINDOWS_PAYLOAD_LAYOUT = "windows-curated-v1"
@@ -59,17 +70,6 @@ WINDOWS_AS_INVOKER_MANIFEST = """<?xml version=\"1.0\" encoding=\"UTF-8\" standa
   </trustInfo>
 </assembly>
 """
-
-NATIVE_SHOWCASE_CONTRACT = "dashgo-showcase/v1"
-NATIVE_SHOWCASE_CAPABILITIES = (
-    "separateDataRoot",
-    "scenarioManifest",
-    "scenarioCalendars",
-    "calendarWritebackAllowlist",
-    "cacheRebuildReport",
-    "statusEndpoint",
-    "staticScenarioAssets",
-)
 
 SHOWCASE_OVERLAY_GO_FILES = (
     "cmd/dashboard-control-server/showcase_mode.go",
@@ -401,30 +401,29 @@ def source_privacy_sanity(ctx: Context) -> None:
                     raise BuildFailure("", "Privacy audit", f"Studio-owned source contains prohibited private/default reference {token!r}: {path.relative_to(ctx.source)}")
 
 
-def native_showcase_contract(app: Path) -> dict | None:
-    path = app / "release" / "showcase-contract.json"
+def native_showcase_contract(app: Path) -> tuple[dict, dict] | None:
+    try:
+        matrix = load_runtime_contract_matrix(SOURCE_ROOT)
+    except RuntimeContractMatrixError as exc:
+        raise BuildFailure("Select Dash-Go Showcase runtime", "Runtime contract matrix", str(exc)) from exc
+    path = app / str(matrix["nativeContract"]["declarationPath"])
     if not path.exists():
         return None
     if not path.is_file():
-        raise BuildFailure("Select Dash-Go Showcase runtime", "Native contract", "showcase-contract.json is not a regular file")
+        raise BuildFailure("Select Dash-Go Showcase runtime", "Native contract", f"{path.name} is not a regular file")
     try:
         contract = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
         raise BuildFailure("Select Dash-Go Showcase runtime", "Native contract", f"cannot read Showcase contract: {exc}") from exc
-    if not isinstance(contract, dict) or contract.get("schema") != 1 or contract.get("contract") != NATIVE_SHOWCASE_CONTRACT:
-        raise BuildFailure("Select Dash-Go Showcase runtime", "Native contract", "Showcase contract is not dashgo-showcase/v1")
-    capabilities = contract.get("capabilities")
-    if not isinstance(capabilities, dict):
-        raise BuildFailure("Select Dash-Go Showcase runtime", "Native contract", "Showcase contract lacks a capabilities object")
-    for capability in NATIVE_SHOWCASE_CAPABILITIES:
-        if capabilities.get(capability) is not True:
-            raise BuildFailure("Select Dash-Go Showcase runtime", "Native contract", f"Showcase contract lacks required capability: {capability}")
-    return contract
+    message = native_contract_error_message(contract, matrix, context="Dash-Go Showcase contract")
+    if message is not None:
+        raise BuildFailure("Select Dash-Go Showcase runtime", "Native contract", message)
+    return contract, matrix
 
 
-def verify_native_showcase_runtime_contract(app: Path, contract: dict) -> None:
+def verify_native_showcase_runtime_contract(app: Path, contract: dict, matrix: dict) -> None:
     phase_name = "Native Showcase Contract v1"
-    if contract.get("contract") != NATIVE_SHOWCASE_CONTRACT:
+    if contract.get("contract") != native_contract_name(matrix):
         raise BuildFailure(phase_name, "Native contract", "unexpected native Showcase contract")
     for relative in SHOWCASE_OVERLAY_GO_FILES:
         if (app / relative).exists():
@@ -913,6 +912,7 @@ def main() -> int:
         with phase(ctx, 1, "Validate source contract and manifest"):
             validate_manifest(ctx)
             run(ctx, "Studio source validation", [sys.executable, "tools/validate_studio_source.py", "--root", str(source)], cwd=source, timeout=120)
+            run(ctx, "Studio runtime-contract matrix validation", [sys.executable, "tools/validate_studio_runtime_contract_matrix.py", "--root", str(source)], cwd=source, timeout=120)
             run(ctx, "Studio branding asset validation", [sys.executable, "tools/validate_studio_branding.py", "--root", str(source)], cwd=source, timeout=120)
             source_privacy_sanity(ctx)
         with phase(ctx, 2, "Verify tools and pinned Go compiler"):
@@ -931,15 +931,18 @@ def main() -> int:
             app = extract / ctx.dashgo_root / "app"
             need_file(app / "go.mod", "Dash-Go module", "")
             compatibility_report = work / "showcase-compatibility-report.json"
-            native_contract = native_showcase_contract(app)
-            if native_contract is not None:
+            native_contract_selection = native_showcase_contract(app)
+            native_contract = None
+            native_contract_matrix = None
+            if native_contract_selection is not None:
+                native_contract, native_contract_matrix = native_contract_selection
                 ctx.showcase_runtime_mode = "native-contract"
-                verify_native_showcase_runtime_contract(app, native_contract)
+                verify_native_showcase_runtime_contract(app, native_contract, native_contract_matrix)
                 write_json(compatibility_report, {
                     "schema": 3,
                     "result": "PASS",
                     "mode": "native-contract",
-                    "contract": NATIVE_SHOWCASE_CONTRACT,
+                    "contract": native_contract_name(native_contract_matrix),
                     "dashGoVersion": ctx.dashgo_version,
                     "legacyAdaptersApplied": False,
                 })

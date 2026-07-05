@@ -30,11 +30,15 @@ def main() -> int:
     windows = root / ".github/workflows/studio-windows-package-candidate.yml"
     intake = root / "tools/prepare_dashgo_release.py"
     intake_test = root / "tools/test_prepare_dashgo_release_beta.py"
+    matrix_validator = root / "tools/validate_studio_runtime_contract_matrix.py"
+    matrix_test = root / "tools/test_showcase_runtime_contract.py"
     stage_packager = root / "ci/stage-package.py"
     package = root / "ci/package-ubuntu.sh"
 
     require_text(
         preflight,
+        "tools/validate_studio_runtime_contract_matrix.py --root .",
+        "python3 tools/test_showcase_runtime_contract.py",
         "tools/validate_studio_native_contract_beta.py --root .",
         "python3 tools/test_prepare_dashgo_release_beta.py",
     )
@@ -42,6 +46,8 @@ def main() -> int:
         stage,
         "dashgo-beta-release",
         "immutable native-contract beta release",
+        "tools/validate_studio_runtime_contract_matrix.py --root .",
+        "tools/test_showcase_runtime_contract.py",
         "tools/validate_studio_native_contract_beta.py --root .",
         "tools/test_prepare_dashgo_release_beta.py",
         "candidate_origin:",
@@ -51,7 +57,8 @@ def main() -> int:
     require_text(
         intake,
         'BETA_NATIVE_PURPOSE = "beta release native contract candidate only"',
-        'NATIVE_SHOWCASE_CONTRACT = "dashgo-showcase/v1"',
+        "load_runtime_contract_matrix",
+        "native_contract_error_message",
         '"dashgo-beta-release"',
         "require_beta_version",
         "require_beta_package_version",
@@ -68,8 +75,21 @@ def main() -> int:
         '"track": "beta"',
     )
     require_text(
+        matrix_validator,
+        "load_runtime_contract_matrix",
+        "native_contract_error_message",
+        "dashgo-showcase/v1",
+    )
+    require_text(
+        matrix_test,
+        "missing capability",
+        "native.status-readiness",
+        "native.browser-routes",
+    )
+    require_text(
         stage_packager,
-        'NATIVE_SHOWCASE_CONTRACT = "dashgo-showcase/v1"',
+        "load_runtime_contract_matrix",
+        "native_contract_error_message",
         "native_showcase_contract",
         "verify_native_showcase_runtime_contract",
         'ctx.showcase_runtime_mode = "native-contract"',

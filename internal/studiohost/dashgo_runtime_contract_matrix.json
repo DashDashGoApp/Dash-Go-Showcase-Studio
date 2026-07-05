@@ -1,0 +1,321 @@
+{
+  "schema": 1,
+  "nativeContract": {
+    "schema": 1,
+    "contract": "dashgo-showcase/v1",
+    "declarationPath": "release/showcase-contract.json",
+    "requiredCapabilities": [
+      {
+        "id": "separateDataRoot",
+        "reason": "Studio must keep mutable scenario data outside the immutable Dash-Go application root.",
+        "consumers": [
+          "native.data-root"
+        ]
+      },
+      {
+        "id": "scenarioManifest",
+        "reason": "Studio must declare the disposable scenario and calendar policy through DASHGO_SHOWCASE_MANIFEST.",
+        "consumers": [
+          "native.scenario-manifest"
+        ]
+      },
+      {
+        "id": "scenarioCalendars",
+        "reason": "Studio must seed and verify its declared local calendar fixtures without discovering user calendars.",
+        "consumers": [
+          "native.calendar-fixtures"
+        ]
+      },
+      {
+        "id": "calendarWritebackAllowlist",
+        "reason": "Only Studio-declared disposable calendars may accept temporary writeback edits.",
+        "consumers": [
+          "native.writable-calendars",
+          "native.status-readiness"
+        ]
+      },
+      {
+        "id": "cacheRebuildReport",
+        "reason": "Studio must refuse to open until seeded events and writeback candidates are represented in the rebuilt cache.",
+        "consumers": [
+          "native.status-readiness"
+        ]
+      },
+      {
+        "id": "statusEndpoint",
+        "reason": "Studio needs machine-readable native readiness evidence rather than relying on a bound loopback port.",
+        "consumers": [
+          "native.status-readiness"
+        ]
+      },
+      {
+        "id": "staticScenarioAssets",
+        "reason": "The browser must receive only the active disposable scenario configuration and fixture assets.",
+        "consumers": [
+          "native.browser-routes"
+        ]
+      }
+    ],
+    "activation": {
+      "runtimeProfile": {
+        "environment": "DASHGO_RUNTIME_PROFILE",
+        "value": "showcase"
+      },
+      "scenarioManifest": {
+        "environment": "DASHGO_SHOWCASE_MANIFEST",
+        "relativePath": "scenario/data/showcase-manifest.json"
+      },
+      "dataRoot": {
+        "environment": "DASHGO_DATA_ROOT",
+        "relativePath": "scenario/data"
+      }
+    },
+    "readiness": {
+      "livenessPath": "/api/ready",
+      "statusPath": "/api/showcase/status",
+      "profile": "showcase",
+      "cache": {
+        "rebuilt": true,
+        "minimumEvents": 1,
+        "minimumWritebackCandidates": 4
+      },
+      "problems": "must-be-empty"
+    },
+    "calendars": [
+      {
+        "source": "calendars/family.green.ics",
+        "mode": "writable",
+        "expectedEventMarker": "SUMMARY:Family meal plan",
+        "minimumWritebackCandidates": 1
+      },
+      {
+        "source": "calendars/school.blue.ics",
+        "mode": "writable",
+        "expectedEventMarker": "SUMMARY:Summer learning camp",
+        "minimumWritebackCandidates": 1
+      },
+      {
+        "source": "calendars/home.amber.ics",
+        "mode": "writable",
+        "expectedEventMarker": "SUMMARY:Grocery pickup",
+        "minimumWritebackCandidates": 1
+      },
+      {
+        "source": "calendars/plans.violet.ics",
+        "mode": "writable",
+        "expectedEventMarker": "SUMMARY:Saturday farmers market",
+        "minimumWritebackCandidates": 1
+      },
+      {
+        "source": "calendars/chore-wheel.ics",
+        "mode": "fixture-only",
+        "expectedEventMarker": "SUMMARY:Kitchen reset —"
+      },
+      {
+        "source": "calendars/routines.ics",
+        "mode": "fixture-only",
+        "expectedEventMarker": "SUMMARY:Morning ready — Avery"
+      },
+      {
+        "source": "calendars/maintenance.ics",
+        "mode": "fixture-only",
+        "expectedEventMarker": "SUMMARY:Test smoke detectors"
+      }
+    ],
+    "browserRoutes": [
+      {
+        "path": "/config/config.local.js",
+        "contains": "Generated for Dash-Go Showcase Studio",
+        "parseJSON": false,
+        "classification": "studio-owned"
+      },
+      {
+        "path": "/config/compliments.json",
+        "contains": "studio-normal",
+        "parseJSON": true,
+        "classification": "studio-owned"
+      },
+      {
+        "path": "/calendars/calendars.json",
+        "contains": "calendars/family.green.ics",
+        "parseJSON": true,
+        "classification": "studio-owned"
+      },
+      {
+        "path": "/calendars/calendars.json",
+        "contains": "calendars/school.blue.ics",
+        "parseJSON": true,
+        "classification": "studio-owned"
+      },
+      {
+        "path": "/calendars/calendars.json",
+        "contains": "calendars/home.amber.ics",
+        "parseJSON": true,
+        "classification": "studio-owned"
+      },
+      {
+        "path": "/calendars/calendars.json",
+        "contains": "calendars/plans.violet.ics",
+        "parseJSON": true,
+        "classification": "studio-owned"
+      },
+      {
+        "path": "/calendars/family.green.ics",
+        "contains": "SUMMARY:Family meal plan",
+        "parseJSON": false,
+        "classification": "studio-owned"
+      },
+      {
+        "path": "/calendars/school.blue.ics",
+        "contains": "SUMMARY:Summer learning camp",
+        "parseJSON": false,
+        "classification": "studio-owned"
+      },
+      {
+        "path": "/calendars/home.amber.ics",
+        "contains": "SUMMARY:Grocery pickup",
+        "parseJSON": false,
+        "classification": "studio-owned"
+      },
+      {
+        "path": "/calendars/plans.violet.ics",
+        "contains": "SUMMARY:Saturday farmers market",
+        "parseJSON": false,
+        "classification": "studio-owned"
+      }
+    ]
+  },
+  "assumptions": [
+    {
+      "id": "native.release-declaration",
+      "classification": "contract-owned",
+      "category": "path",
+      "value": "release/showcase-contract.json",
+      "detail": "Published Dash-Go source declares the native Contract v1 capabilities before Studio stages it."
+    },
+    {
+      "id": "native.source-entrypoint",
+      "classification": "studio-owned",
+      "category": "binary",
+      "value": "cmd/dashboard-control-server",
+      "detail": "Studio cross-builds Dash-Go's documented server package into its own curated package layout."
+    },
+    {
+      "id": "native.packaged-server",
+      "classification": "studio-owned",
+      "category": "binary",
+      "value": "runtime/app/bin/dash-go-showcase-server[.exe]",
+      "detail": "The Studio installer owns this filename; Dash-Go does not need to expose it as an upstream contract."
+    },
+    {
+      "id": "native.immutable-app-root",
+      "classification": "studio-owned",
+      "category": "path",
+      "value": "runtime/app",
+      "detail": "Studio keeps the packaged Dash-Go root immutable and places all scenario data below its private state root."
+    },
+    {
+      "id": "native.scenario-manifest",
+      "classification": "contract-owned",
+      "category": "path",
+      "value": "DASHGO_SHOWCASE_MANIFEST -> scenario/data/showcase-manifest.json",
+      "detail": "Contract v1 accepts Studio's disposable manifest instead of discovering local calendars."
+    },
+    {
+      "id": "native.data-root",
+      "classification": "contract-owned",
+      "category": "path",
+      "value": "DASHGO_DATA_ROOT -> scenario/data",
+      "detail": "Contract v1 routes mutable config, calendars, cache, logs, and fonts into the private scenario data root."
+    },
+    {
+      "id": "native.calendar-fixtures",
+      "classification": "studio-owned",
+      "category": "calendars",
+      "value": "seven synthetic .ics fixtures; exactly four writable candidates",
+      "detail": "The names, event markers, and fixture corpus are Studio presentation data; Contract v1 supplies only the declared scenario calendar capability."
+    },
+    {
+      "id": "native.fixture-data",
+      "classification": "studio-owned",
+      "category": "fixture-data",
+      "value": "config.local.js, compliments.json, calendar registry, offline weather marker",
+      "detail": "Studio owns fictional content and marker assertions; Dash-Go supplies constrained static scenario-asset serving."
+    },
+    {
+      "id": "native.liveness",
+      "classification": "studio-owned",
+      "category": "readiness",
+      "value": "/api/ready",
+      "detail": "Studio uses ordinary server liveness before native contract verification; this endpoint is not used as Contract v1 evidence."
+    },
+    {
+      "id": "native.status-readiness",
+      "classification": "contract-owned",
+      "category": "readiness",
+      "value": "/api/showcase/status",
+      "detail": "Contract v1 must report profile, cache, four writable declared calendars, and no problems before Studio opens a browser."
+    },
+    {
+      "id": "native.browser-routes",
+      "classification": "contract-owned",
+      "category": "browser-url",
+      "value": "static routes under /config and /calendars plus /api/weather",
+      "detail": "Contract v1 must expose the active scenario root without falling back to immutable application data; exact fixture markers remain Studio-owned."
+    },
+    {
+      "id": "legacy.bridge-window",
+      "classification": "legacy-only",
+      "category": "path",
+      "value": "1.5.7 <= Dash-Go version < 1.6.0",
+      "detail": "Older packages without a valid native declaration use the reviewed adapter bridge only inside its explicit compatibility window."
+    },
+    {
+      "id": "legacy.activation",
+      "classification": "legacy-only",
+      "category": "path",
+      "value": "DASHGO_HOME, DASHGO_SHOWCASE=1, DASHGO_SHOWCASE_DATA_ROOT",
+      "detail": "These overlays are not part of native Contract v1 and must never be applied to a native candidate."
+    },
+    {
+      "id": "legacy.calendar-writeback",
+      "classification": "legacy-only",
+      "category": "calendars",
+      "value": "config/calendar-writeback.json and /api/calendar/writeback/status",
+      "detail": "Legacy writeback registry rebasing and event-management endpoint checks remain bridge-specific."
+    }
+  ],
+  "legacyBridge": {
+    "classification": "legacy-only",
+    "profile": "legacy-bridge-v1",
+    "minimumVersion": "1.5.7",
+    "maximumVersionExclusive": "1.6.0",
+    "fallbackRule": "An absent native declaration may enter the reviewed bridge; a malformed or capability-incomplete native declaration fails closed and must not fall back.",
+    "browserRoutes": [
+      {
+        "path": "/calendars/chore-wheel.ics",
+        "contains": "SUMMARY:Kitchen reset —",
+        "parseJSON": false,
+        "classification": "studio-owned"
+      },
+      {
+        "path": "/calendars/routines.ics",
+        "contains": "SUMMARY:Morning ready — Avery",
+        "parseJSON": false,
+        "classification": "studio-owned"
+      },
+      {
+        "path": "/calendars/maintenance.ics",
+        "contains": "SUMMARY:Test smoke detectors",
+        "parseJSON": false,
+        "classification": "studio-owned"
+      },
+      {
+        "path": "/api/weather",
+        "contains": "showcase-fixture",
+        "parseJSON": true,
+        "classification": "studio-owned"
+      }
+    ]
+  }
+}

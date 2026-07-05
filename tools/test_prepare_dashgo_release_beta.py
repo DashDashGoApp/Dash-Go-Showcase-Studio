@@ -45,7 +45,7 @@ def add_text(archive: tarfile.TarFile, name: str, text: str) -> None:
     archive.addfile(info, io.BytesIO(data))
 
 
-def make_source_archive(path: Path) -> None:
+def make_source_archive(path: Path, capabilities: dict[str, bool] = REQUIRED_CAPABILITIES) -> None:
     root = f"dash-go-source-{VERSION}"
     with tarfile.open(path, "w:gz") as archive:
         add_text(archive, f"{root}/app/VERSION", VERSION + "\n")
@@ -53,7 +53,7 @@ def make_source_archive(path: Path) -> None:
         add_text(
             archive,
             f"{root}/app/release/showcase-contract.json",
-            json.dumps({"schema": 1, "contract": "dashgo-showcase/v1", "capabilities": REQUIRED_CAPABILITIES}) + "\n",
+            json.dumps({"schema": 1, "contract": "dashgo-showcase/v1", "capabilities": capabilities}) + "\n",
         )
         add_text(archive, f"{root}/app/cmd/dashboard-control-server/main.go", "package main\n")
         add_text(archive, f"{root}/app/ui/js/bundle.manifest.json", "{}\n")
@@ -173,6 +173,25 @@ def main() -> int:
         manifest = json.loads((source_root / "studio.manifest.json").read_text(encoding="utf-8"))
         if manifest.get("dashGoVersion") != VERSION or manifest.get("releasePackageVersion") != "9.8.7-test.1":
             raise AssertionError("native beta did not update the isolated Studio manifest")
+
+        incomplete = temp / "Dash-Go_incomplete_source.tar.gz"
+        incomplete_capabilities = dict(REQUIRED_CAPABILITIES)
+        incomplete_capabilities.pop("statusEndpoint")
+        incomplete_capabilities["staticScenarioAssets"] = False
+        make_source_archive(incomplete, incomplete_capabilities)
+        try:
+            tool.validate_archive(incomplete, VERSION, "beta", require_native_contract=True)
+        except tool.ReleaseInputError as exc:
+            message = str(exc)
+            for token in (
+                "does not satisfy Studio runtime contract matrix",
+                "missing capability 'statusEndpoint' required by native.status-readiness",
+                "missing capability 'staticScenarioAssets' required by native.browser-routes",
+            ):
+                if token not in message:
+                    raise AssertionError(f"native beta materializer error lacks {token!r}: {message}")
+        else:
+            raise AssertionError("native beta materializer accepted an incomplete Contract v1 declaration")
 
     print("PASS: immutable native-contract beta materializer hermetic test succeeded.")
     return 0

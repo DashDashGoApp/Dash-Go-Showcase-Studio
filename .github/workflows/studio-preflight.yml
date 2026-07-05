@@ -94,10 +94,12 @@ jobs:
           python3 tools/validate_studio_stable_release_bridge.py --root .
           python3 tools/validate_studio_windows_candidate.py --root .
 
-      - name: Verify native Showcase Contract beta candidate lane
+      - name: Verify native Showcase runtime-contract matrix and beta candidate lane
         shell: bash
         run: |
           set -euo pipefail
+          python3 tools/validate_studio_runtime_contract_matrix.py --root .
+          python3 tools/test_showcase_runtime_contract.py
           python3 tools/validate_studio_native_contract_beta.py --root .
           python3 tools/test_prepare_dashgo_release_beta.py
 

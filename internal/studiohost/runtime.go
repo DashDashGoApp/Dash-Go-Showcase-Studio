@@ -34,7 +34,21 @@ type nativeShowcaseContract struct {
 	Capabilities map[string]bool `json:"capabilities"`
 }
 
-const nativeShowcaseContractName = "dashgo-showcase/v1"
+const (
+	nativeShowcaseContractName = "dashgo-showcase/v1"
+	showcaseLivenessPath       = "/api/ready"
+	showcaseStatusPath         = "/api/showcase/status"
+)
+
+var nativeShowcaseRequiredCapabilities = []string{
+	"separateDataRoot",
+	"scenarioManifest",
+	"scenarioCalendars",
+	"calendarWritebackAllowlist",
+	"cacheRebuildReport",
+	"statusEndpoint",
+	"staticScenarioAssets",
+}
 
 func (a *App) nativeShowcaseContractAvailable() (bool, error) {
 	path := filepath.Join(a.paths.runtimeApp, "release", "showcase-contract.json")
@@ -61,15 +75,7 @@ func (a *App) nativeShowcaseContractAvailable() (bool, error) {
 	if contract.Schema != 1 || contract.Contract != nativeShowcaseContractName {
 		return false, errors.New("packaged Dash-Go Showcase contract is unsupported")
 	}
-	for _, capability := range []string{
-		"separateDataRoot",
-		"scenarioManifest",
-		"scenarioCalendars",
-		"calendarWritebackAllowlist",
-		"cacheRebuildReport",
-		"statusEndpoint",
-		"staticScenarioAssets",
-	} {
+	for _, capability := range nativeShowcaseRequiredCapabilities {
 		if !contract.Capabilities[capability] {
 			return false, fmt.Errorf("packaged Dash-Go Showcase contract is missing capability %q", capability)
 		}
@@ -428,14 +434,14 @@ func (a *App) assertReady(baseURL string) error {
 	deadline := time.Now().Add(20 * time.Second)
 	var last error
 	for time.Now().Before(deadline) {
-		response, err := client.Get(baseURL + "/api/ready")
+		response, err := client.Get(baseURL + showcaseLivenessPath)
 		if err == nil {
 			_, _ = io.Copy(io.Discard, response.Body)
 			_ = response.Body.Close()
 			if response.StatusCode == http.StatusOK {
 				return nil
 			}
-			last = fmt.Errorf("/api/ready returned HTTP %d", response.StatusCode)
+			last = fmt.Errorf("%s returned HTTP %d", showcaseLivenessPath, response.StatusCode)
 		} else {
 			last = err
 		}
@@ -608,7 +614,7 @@ func assertNativeShowcaseContractReadyWithRetry(baseURL string, attempts int, de
 
 func assertNativeShowcaseContractReadyOnce(baseURL string) error {
 	client := &http.Client{Timeout: 1500 * time.Millisecond}
-	response, err := client.Get(baseURL + "/api/showcase/status")
+	response, err := client.Get(baseURL + showcaseStatusPath)
 	if err != nil {
 		return fmt.Errorf("read Dash-Go Showcase status: %w", err)
 	}
@@ -618,7 +624,7 @@ func assertNativeShowcaseContractReadyOnce(baseURL string) error {
 		return fmt.Errorf("read Dash-Go Showcase status response: %w", err)
 	}
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("Dash-Go Showcase status returned HTTP %d", response.StatusCode)
+		return fmt.Errorf("Dash-Go Showcase status %s returned HTTP %d", showcaseStatusPath, response.StatusCode)
 	}
 	var status nativeShowcaseStatus
 	if err := json.Unmarshal(body, &status); err != nil {

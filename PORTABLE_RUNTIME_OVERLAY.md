@@ -1,6 +1,6 @@
 # Portable Showcase Runtime Overlay
 
-The Studio Builder never modifies the embedded Dash-Go 1.5.2 source archive. It extracts the exact hash-pinned archive into a native Builder transaction folder and applies `tools/patch_dashgo_engine.py` only there.
+The Studio Builder never modifies a Dash-Go source archive. It extracts the exact hash-pinned archive into a native Builder transaction folder and invokes `tools/apply_dashgo_compatibility.py` only there. The checked-in legacy bridge selects an exact version-and-SHA-256 profile, runs the ordered portable-runtime and session-calendar adapters, and writes one machine-readable compatibility report.
 
 ## Purpose
 
@@ -17,7 +17,7 @@ The overlay creates the narrow server and browser boundary needed for a disposab
 
 ## Safety contract
 
-A source-anchor mismatch is a build failure. The patcher does not attempt fuzzy edits or silently continue when the pinned baseline changes. The guided baseline refresh workflow first applies the same patcher to a disposable extraction of a caller-supplied Dash-Go source handoff. Only an exact successful preflight may update Studio manifest/archive metadata; an upstream source change remains a deliberate overlay-maintenance task.
+An unknown version-and-SHA-256 pair is a build failure before any adapter runs. A known adapter source-anchor mismatch is also a build failure. The patcher does not attempt fuzzy edits or silently continue when the pinned baseline changes. The guided baseline refresh workflow first applies the same patcher to a disposable extraction of a caller-supplied Dash-Go source handoff. Only an exact successful preflight may update Studio manifest/archive metadata; an upstream source change remains a deliberate overlay-maintenance task.
 
 ## Formatting contract
 

@@ -872,8 +872,23 @@ def main() -> int:
             safe_extract(archive, extract, ctx.dashgo_root, "Extract Dash-Go source")
             app = extract / ctx.dashgo_root / "app"
             need_file(app / "go.mod", "Dash-Go module", "")
-            run(ctx, "Apply Showcase overlay", [sys.executable, str(source / "tools/patch_dashgo_engine.py"), "--app", str(app)], cwd=source, timeout=120)
-            run(ctx, "Apply Showcase r7 calendar and presentation overlay", [sys.executable, str(source / "tools/patch_dashgo_r7.py"), "--app", str(app), "--gofmt", str(Path(ctx.go).with_name("gofmt"))], cwd=source, timeout=120)
+            compatibility_report = work / "showcase-compatibility-report.json"
+            run(
+                ctx,
+                "Apply Dash-Go Showcase compatibility profile",
+                [
+                    sys.executable,
+                    str(source / "tools/apply_dashgo_compatibility.py"),
+                    "--source-root", str(source),
+                    "--app", str(app),
+                    "--source-archive", str(archive),
+                    "--source-sha256", str(ctx.manifest["dashGoSourceSha256"]),
+                    "--gofmt", str(Path(ctx.go).with_name("gofmt")),
+                    "--report", str(compatibility_report),
+                ],
+                cwd=source,
+                timeout=120,
+            )
             verify_showcase_overlay_formatting(ctx, app)
         with phase(ctx, 4, "Generate and validate browser assets"):
             run(ctx, "Generate Dash-Go browser assets", [sys.executable, str(source / "tools/generate_dashgo_assets.py"), "--app", str(app)], cwd=source, timeout=240)

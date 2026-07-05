@@ -86,6 +86,25 @@ func TestR8RuntimeChecksEventCapabilitiesAfterWritebackStatus(t *testing.T) {
 	}
 }
 
+func TestR87PatchResolvesEventCacheSourcesFromSessionCalendarDir(t *testing.T) {
+	body, err := os.ReadFile("../../tools/patch_dashgo_r7.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, required := range []string{
+		"Studio event-cache calendar source resolution",
+		`if strings.HasPrefix(filepath.ToSlash(u), "calendars/") {`,
+		`filepath.Join(s.calendarDir, filepath.FromSlash(rel))`,
+		"TestShowcaseEventCacheResolvesCalendarSourcesFromConfiguredCalendarDir",
+		"calendar traversal escaped the configured calendar directory",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("r8.7 event-cache calendar source contract is missing %q", required)
+		}
+	}
+}
+
 func r8Event(source, title string, canEdit, canOccurrenceEdit bool) map[string]any {
 	return map[string]any{
 		"title": title,

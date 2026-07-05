@@ -122,6 +122,42 @@ def main() -> int:
     if not gofmt.is_file():
         fail(f'gofmt is unavailable: {gofmt}')
 
+    event_sources = app / 'internal/calendar/events/sources.go'
+    event_source_old = """\tu := strings.Split(strings.Split(url, "?")[0], "#")[0]\n\tp := filepath.Clean(filepath.Join(s.dashDir, u))"""
+    event_source_new = """\tu := strings.Split(strings.Split(url, "?")[0], "#")[0]\n\tif strings.HasPrefix(filepath.ToSlash(u), "calendars/") {\n\t\trel := strings.TrimPrefix(filepath.ToSlash(u), "calendars/")\n\t\tp := filepath.Clean(filepath.Join(s.calendarDir, filepath.FromSlash(rel)))\n\t\tcalendarClean := filepath.Clean(s.calendarDir)\n\t\tif p != calendarClean && strings.HasPrefix(p, calendarClean+string(os.PathSeparator)) {\n\t\t\treturn p\n\t\t}\n\t\treturn ""\n\t}\n\tp := filepath.Clean(filepath.Join(s.dashDir, u))"""
+    replace_once(
+        event_sources,
+        event_source_old,
+        event_source_new,
+        'Studio event-cache calendar source resolution',
+    )
+    event_sources_test = app / 'internal/calendar/events/showcase_calendar_source_resolution_test.go'
+    write(event_sources_test, r"""package events
+
+import (
+	"path/filepath"
+	"testing"
+)
+
+func TestShowcaseEventCacheResolvesCalendarSourcesFromConfiguredCalendarDir(t *testing.T) {
+	root := t.TempDir()
+	runtimeDir := filepath.Join(root, "runtime")
+	calendarDir := filepath.Join(root, "session", "calendars")
+	service := New(ServiceConfig{DashDir: runtimeDir, CalendarDir: calendarDir})
+
+	want := filepath.Join(calendarDir, "plans.violet.ics")
+	if got := service.eventURLToPath("calendars/plans.violet.ics"); got != want {
+		t.Fatalf("calendar source path = %q, want %q", got, want)
+	}
+	if got := service.eventURLToPath("calendars/../outside.ics"); got != "" {
+		t.Fatalf("calendar traversal escaped the configured calendar directory: %q", got)
+	}
+	if got := service.eventURLToPath("ui/example.ics"); got != filepath.Join(runtimeDir, "ui", "example.ics") {
+		t.Fatalf("non-calendar path = %q, want immutable runtime path", got)
+	}
+}
+""")
+
     mode = app / 'cmd/dashboard-control-server/showcase_mode.go'
     replace_once(mode, 'case "calendars/family.green.ics", "calendars/home.amber.ics", "calendars/plans.violet.ics":', 'case "calendars/family.green.ics", "calendars/school.blue.ics", "calendars/home.amber.ics", "calendars/plans.violet.ics":', 'School session-write allowlist')
 
@@ -180,7 +216,7 @@ def main() -> int:
 }
 ''' )
 
-    subprocess.run([str(gofmt), '-w', str(mode), str(static_test), str(sandbox_go), str(writeback)], check=True)
+    subprocess.run([str(gofmt), '-w', str(mode), str(static_test), str(sandbox_go), str(writeback), str(event_sources), str(event_sources_test)], check=True)
     return 0
 
 

@@ -31,6 +31,7 @@ const sessionCalendarWritebackFile = "calendar-writeback.json"
 
 var sessionCalendarWritableSources = map[string]struct{}{
 	"calendars/family.green.ics": {},
+	"calendars/school.blue.ics":  {},
 	"calendars/home.amber.ics":   {},
 	"calendars/plans.violet.ics": {},
 }

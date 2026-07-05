@@ -413,12 +413,7 @@ def showcase_tour_guard_view_contract(ctx: Context, app: Path) -> None:
     app_sources = js_manifest.get("bundles", {}).get("app")
     if not isinstance(app_sources, list):
         raise BuildFailure(phase_name, "Manifest", "staged browser manifest has no app bundle list")
-    expected_tail = [
-        "family-board-footer.js",
-        "showcase-tour.js",
-        "showcase-view.js",
-        "showcase-calendar-sandbox.js",
-    ]
+    expected_tail = ["family-board-footer.js", "showcase-tour.js", "showcase-view.js", "showcase-calendar-sandbox.js"]
     if app_sources[-len(expected_tail):] != expected_tail:
         raise BuildFailure(phase_name, "Manifest", f"staged app bundle tail must be {expected_tail}, found {app_sources[-len(expected_tail):]}")
     css_manifest = json.loads((app / "ui/css/bundle.manifest.json").read_text(encoding="utf-8"))
@@ -878,6 +873,7 @@ def main() -> int:
             app = extract / ctx.dashgo_root / "app"
             need_file(app / "go.mod", "Dash-Go module", "")
             run(ctx, "Apply Showcase overlay", [sys.executable, str(source / "tools/patch_dashgo_engine.py"), "--app", str(app)], cwd=source, timeout=120)
+    run(ctx, "Apply Showcase r7 calendar and presentation overlay", [sys.executable, str(source / "tools/patch_dashgo_r7.py"), "--app", str(app), "--gofmt", str(Path(ctx.go).with_name("gofmt"))], cwd=source, timeout=120)
             verify_showcase_overlay_formatting(ctx, app)
         with phase(ctx, 4, "Generate and validate browser assets"):
             run(ctx, "Generate Dash-Go browser assets", [sys.executable, str(source / "tools/generate_dashgo_assets.py"), "--app", str(app)], cwd=source, timeout=240)

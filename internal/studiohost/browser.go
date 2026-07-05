@@ -210,13 +210,10 @@ func (a *App) launchBrowser(pageURL string) error {
 		"--remote-allow-origins=http://127.0.0.1,http://localhost",
 		"--app=" + pageURL,
 	}
-	if view.Fit && !a.options.Kiosk {
-		// Start normal and inspect the work area before selecting a preset. A
-		// normal bootstrap window lets the adaptive path account for title-bar
-		// chrome and taskbar-safe space instead of treating Fit as maximized.
+	if !a.options.Kiosk {
+		// Every live Showcase View starts from a bounded host window. A device
+		// preset later applies its exact virtual CSS viewport within that area.
 		args = append(args, "--window-size=1024,600")
-	} else if !view.Fit {
-		args = append(args, fmt.Sprintf("--window-size=%d,%d", view.Width, view.Height))
 	}
 	if a.options.Kiosk {
 		args = append(args, "--kiosk")
@@ -321,6 +318,34 @@ func applyChromiumViewport(port int, view viewportSpec, result *viewportResult) 
 	return fmt.Errorf("apply live Showcase viewport: %w", last)
 }
 
+func fitPreviewContents(workWidth, workHeight, frameWidth, frameHeight, cssWidth, cssHeight int) (int, int, float64, bool) {
+	if workWidth < 1 || workHeight < 1 || frameWidth < 0 || frameHeight < 0 || cssWidth < 1 || cssHeight < 1 {
+		return 0, 0, 0, false
+	}
+	availableWidth := workWidth - frameWidth
+	availableHeight := workHeight - frameHeight
+	if availableWidth < 1 || availableHeight < 1 {
+		return 0, 0, 0, false
+	}
+	nativeWidth := cssWidth
+	nativeHeight := cssHeight
+	if nativeWidth > availableWidth {
+		nativeWidth = availableWidth
+	}
+	if nativeHeight > availableHeight {
+		nativeHeight = availableHeight
+	}
+	scale := float64(nativeWidth) / float64(cssWidth)
+	heightScale := float64(nativeHeight) / float64(cssHeight)
+	if heightScale < scale {
+		scale = heightScale
+	}
+	if scale <= 0 {
+		return 0, 0, 0, false
+	}
+	return nativeWidth, nativeHeight, scale, true
+}
+
 func applyChromiumViewportOnce(port int, view viewportSpec, result *viewportResult) error {
 	windowID, err := cdpBrowserWindowID(port)
 	if err != nil {
@@ -339,7 +364,7 @@ func applyChromiumViewportOnce(port int, view viewportSpec, result *viewportResu
 		}); err != nil {
 			return fmt.Errorf("maximize Studio browser window: %w", err)
 		}
-		result.Presentation = "Fit display"
+		result.Presentation = "Use this display · high-DPI"
 		return nil
 	}
 
@@ -351,51 +376,44 @@ func applyChromiumViewportOnce(port int, view viewportSpec, result *viewportResu
 	}); err != nil {
 		return fmt.Errorf("restore Studio browser window: %w", err)
 	}
+	if _, err := cdpCall(port, "Emulation.clearDeviceMetricsOverride", map[string]any{}); err != nil {
+		return err
+	}
 
+	workWidth, workHeight, frameWidth, frameHeight, err := cdpDisplayWorkArea(port)
+	if err != nil {
+		return fmt.Errorf("measure Studio display work area: %w", err)
+	}
+	nativeWidth, nativeHeight, scale, ok := fitPreviewContents(workWidth, workHeight, frameWidth, frameHeight, view.Width, view.Height)
+	if !ok {
+		return fmt.Errorf("no safe native Studio content area is available for %dx%d", view.Width, view.Height)
+	}
 	if _, err := cdpBrowserCall(port, "Browser.setContentsSize", map[string]any{
 		"windowId": windowID,
-		"width":    view.Width,
-		"height":   view.Height,
+		"width":    nativeWidth,
+		"height":   nativeHeight,
 	}); err != nil {
 		return fmt.Errorf("resize Studio browser contents: %w", err)
 	}
 
 	if !view.Preview {
-		if _, err := cdpCall(port, "Emulation.clearDeviceMetricsOverride", map[string]any{}); err != nil {
-			return err
-		}
-		result.Presentation = "Native high-DPI presentation"
+		result.Presentation = "Use this display · high-DPI"
 		return nil
 	}
-
 	if _, err := cdpCall(port, "Emulation.setDeviceMetricsOverride", map[string]any{
 		"width":             view.Width,
 		"height":            view.Height,
 		"deviceScaleFactor": 1,
 		"mobile":            false,
+		"scale":             scale,
 	}); err != nil {
 		return err
 	}
 
-	metrics, err := cdpCall(port, "Runtime.evaluate", map[string]any{
-		"expression":    "JSON.stringify({innerWidth:window.innerWidth,innerHeight:window.innerHeight,outerWidth:window.outerWidth,outerHeight:window.outerHeight})",
-		"returnByValue": true,
-	})
-	if err != nil {
-		return err
+	result.Presentation = "Device preview · exact CSS viewport"
+	if scale < 0.9999 {
+		result.Presentation = "Device preview · exact CSS viewport · fitted to display"
 	}
-
-	innerWidth, innerHeight, outerWidth, outerHeight := cdpWindowMetrics(metrics)
-	if innerWidth == view.Width && innerHeight == view.Height {
-		result.Presentation = "Device preview · exact CSS viewport"
-	} else {
-		result.Presentation = "Device preview · scaled CSS viewport"
-	}
-
-	if outerWidth > 0 && outerHeight > 0 && (outerWidth < view.Width || outerHeight < view.Height) {
-		result.Presentation = "Device preview · scaled CSS viewport"
-	}
-
 	return nil
 }
 

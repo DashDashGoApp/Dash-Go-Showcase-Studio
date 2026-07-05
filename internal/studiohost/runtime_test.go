@@ -234,7 +234,7 @@ func TestRebaseSessionCalendarWritebackRegistryUsesLiveScenarioHome(t *testing.T
 	activeHome := filepath.Join(root, "scenario", "home")
 	stageCollections := filepath.Join(stageHome, ".dashboard-vdirsyncer", "collections")
 	activeCollections := filepath.Join(activeHome, ".dashboard-vdirsyncer", "collections")
-	for _, name := range []string{"showcase-family.green", "showcase-home.amber", "showcase-plans.violet"} {
+	for _, name := range []string{"showcase-family.green", "showcase-school.blue", "showcase-home.amber", "showcase-plans.violet"} {
 		if err := os.MkdirAll(filepath.Join(stageCollections, name), 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -249,6 +249,7 @@ func TestRebaseSessionCalendarWritebackRegistryUsesLiveScenarioHome(t *testing.T
   "requirePin": false,
   "calendars": [
     {"source":"calendars/family.green.ics","collection":"` + filepath.ToSlash(filepath.Join(stageCollections, "showcase-family.green")) + `","writable":true,"enabled":true,"name":"Family"},
+    {"source":"calendars/school.blue.ics","collection":"` + filepath.ToSlash(filepath.Join(stageCollections, "showcase-school.blue")) + `","writable":true,"enabled":true,"name":"School"},
     {"source":"calendars/home.amber.ics","collection":"` + filepath.ToSlash(filepath.Join(stageCollections, "showcase-home.amber")) + `","writable":true,"enabled":true,"name":"Home"},
     {"source":"calendars/plans.violet.ics","collection":"` + filepath.ToSlash(filepath.Join(stageCollections, "showcase-plans.violet")) + `","writable":true,"enabled":true,"name":"Plans"}
   ]
@@ -285,6 +286,7 @@ func TestAssertSessionCalendarWritebackReadyRequiresAllSessionCapabilities(t *te
 		}
 		_, _ = w.Write([]byte(`{"enabled":true,"requirePin":false,"calendars":[
 {"source":"calendars/family.green.ics","writable":true,"enabled":true,"deleteAllowed":true},
+{"source":"calendars/school.blue.ics","writable":true,"enabled":true,"deleteAllowed":true},
 {"source":"calendars/home.amber.ics","writable":true,"enabled":true,"deleteAllowed":true},
 {"source":"calendars/plans.violet.ics","writable":true,"enabled":true,"deleteAllowed":true}
 ]}`))
@@ -299,6 +301,7 @@ func TestAssertSessionCalendarWritebackReadyRejectsMissingDeleteCapability(t *te
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"enabled":true,"requirePin":false,"calendars":[
 {"source":"calendars/family.green.ics","writable":true,"enabled":true,"deleteAllowed":true},
+{"source":"calendars/school.blue.ics","writable":true,"enabled":true,"deleteAllowed":true},
 {"source":"calendars/home.amber.ics","writable":true,"enabled":true,"deleteAllowed":true},
 {"source":"calendars/plans.violet.ics","writable":true,"enabled":true,"deleteAllowed":false}
 ]}`))

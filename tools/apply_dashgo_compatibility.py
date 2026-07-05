@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Apply one checked-in, fail-closed Dash-Go Showcase compatibility profile.
 
-This legacy bridge is temporary while Dash-Go Showcase Contract v1 is built. It
-selects a profile only by an exact Dash-Go version plus source-archive SHA-256,
-runs its ordered adapters, and writes a machine-readable compatibility report.
+This bridge is temporary while Dash-Go Showcase Contract v1 is built. GitHub
+release-asset SHA-256 remains an immutable provenance check. Profile selection
+uses a narrow Dash-Go version window; the adapters themselves are the final,
+fail-closed source-shape probe and reject any changed required anchor.
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ class CompatibilityError(RuntimeError):
     pass
 
 
-VERSION_RE = re.compile(r"\d+\.\d+\.\d+(?:-beta\.\d+)?")
+VERSION_RE = re.compile(r"(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)(?:-beta\.(?P<beta>\d+))?")
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 
@@ -42,46 +43,73 @@ def load_json(path: Path, label: str) -> dict:
     return payload
 
 
+def parse_version(value: str, label: str = "Dash-Go version") -> tuple[int, int, int, int, int]:
+    match = VERSION_RE.fullmatch(value)
+    if not match:
+        raise CompatibilityError(f"{label} must use X.Y.Z or X.Y.Z-beta.N")
+    beta = match.group("beta")
+    # A beta precedes the stable release with the same numeric core.
+    return (
+        int(match.group("major")),
+        int(match.group("minor")),
+        int(match.group("patch")),
+        0 if beta is not None else 1,
+        int(beta or 0),
+    )
+
+
 def load_matrix(path: Path) -> dict:
     matrix = load_json(path, "compatibility matrix")
     profiles = matrix.get("profiles")
-    if matrix.get("schema") != 1 or not isinstance(profiles, list) or not profiles:
-        raise CompatibilityError("compatibility matrix schema must be 1 with a non-empty profiles array")
+    if matrix.get("schema") != 2 or not isinstance(profiles, list) or not profiles:
+        raise CompatibilityError("compatibility matrix schema must be 2 with a non-empty profiles array")
     return matrix
 
 
 def load_release_version(app: Path) -> str:
     release = load_json(app / "release" / "release.json", "Dash-Go release metadata")
     version = release.get("version")
-    if not isinstance(version, str) or not VERSION_RE.fullmatch(version):
+    if not isinstance(version, str):
         raise CompatibilityError("Dash-Go release metadata has an invalid version")
+    parse_version(version, "Dash-Go release metadata version")
     version_file = app / "VERSION"
     if not version_file.is_file() or version_file.read_text(encoding="utf-8").strip() != version:
         raise CompatibilityError("Dash-Go app/VERSION does not match release metadata")
     return version
 
 
+def source_policy(profile: dict) -> dict:
+    policy = profile.get("sourcePolicy")
+    if not isinstance(policy, dict):
+        raise CompatibilityError(f"compatibility profile {profile['id']} has no source policy")
+    if policy.get("selection") != "adapter-probe":
+        raise CompatibilityError(f"compatibility profile {profile['id']} has an unsupported source selection policy")
+    minimum = policy.get("minimumVersion")
+    maximum = policy.get("maximumVersionExclusive")
+    if not isinstance(minimum, str) or not isinstance(maximum, str):
+        raise CompatibilityError(f"compatibility profile {profile['id']} has an invalid version window")
+    if parse_version(minimum, "compatibility minimum version") >= parse_version(maximum, "compatibility maximum version"):
+        raise CompatibilityError(f"compatibility profile {profile['id']} has an empty version window")
+    return policy
+
+
 def select_profile(matrix: dict, version: str, source_sha256: str) -> tuple[dict, dict]:
-    if not VERSION_RE.fullmatch(version):
-        raise CompatibilityError("Dash-Go version must use X.Y.Z or X.Y.Z-beta.N")
+    actual_version = parse_version(version)
     if not SHA256_RE.fullmatch(source_sha256):
         raise CompatibilityError("source SHA-256 must be lowercase hexadecimal")
     matches: list[tuple[dict, dict]] = []
     for profile in matrix["profiles"]:
         if not isinstance(profile, dict) or not isinstance(profile.get("id"), str) or not profile["id"].strip():
             raise CompatibilityError("compatibility matrix has an invalid profile")
-        sources = profile.get("sources")
-        if not isinstance(sources, list) or not sources:
-            raise CompatibilityError(f"compatibility profile {profile['id']} has no source rules")
-        for source in sources:
-            if not isinstance(source, dict):
-                raise CompatibilityError(f"compatibility profile {profile['id']} has an invalid source rule")
-            if source.get("version") == version and source.get("sourceSha256") == source_sha256:
-                matches.append((profile, source))
+        policy = source_policy(profile)
+        minimum = parse_version(policy["minimumVersion"], "compatibility minimum version")
+        maximum = parse_version(policy["maximumVersionExclusive"], "compatibility maximum version")
+        if minimum <= actual_version < maximum:
+            matches.append((profile, policy))
     if len(matches) != 1:
         raise CompatibilityError(
-            f"no single supported legacy profile matches Dash-Go {version} source {source_sha256}; "
-            "add a reviewed exact-hash matrix entry or migrate this source to Showcase Contract v1"
+            f"no single supported legacy profile matches Dash-Go {version}; "
+            "the current version is outside the reviewed adapter-probe window or must migrate to Showcase Contract v1"
         )
     return matches[0]
 
@@ -156,7 +184,7 @@ def main() -> int:
         raise CompatibilityError(f"staged Dash-Go app directory is missing: {app}")
 
     version = load_release_version(app)
-    profile, source_rule = select_profile(load_matrix(matrix_path), version, actual_sha)
+    profile, policy = select_profile(load_matrix(matrix_path), version, actual_sha)
     require_app_paths(app, profile)
     checks = profile.get("requiredCandidateChecks")
     adapters = profile.get("adapters")
@@ -166,12 +194,12 @@ def main() -> int:
         raise CompatibilityError(f"compatibility profile {profile['id']} has no adapters")
 
     report = {
-        "schema": 1,
+        "schema": 2,
         "result": "PASS",
         "profile": profile["id"],
         "dashGoVersion": version,
         "dashGoSourceSha256": actual_sha,
-        "sourceRule": source_rule,
+        "sourcePolicy": policy,
         "requiredCandidateChecks": checks,
         "adapters": [],
     }

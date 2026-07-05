@@ -248,37 +248,25 @@ def main() -> int:
     if "const location=" in patcher or re.search(r"(?<![\w.])location\.(?:reload|assign)\(", patcher):
         raise CheckError("Staged Dash-Go tour must not shadow window.location")
     compatibility_matrix = json.loads((root / "tools/dashgo_compatibility.json").read_text(encoding="utf-8"))
-    if compatibility_matrix.get("schema") != 1:
-        raise CheckError("Showcase compatibility matrix schema must be 1")
+    if compatibility_matrix.get("schema") != 2:
+        raise CheckError("Showcase compatibility matrix schema must be 2")
     profiles = compatibility_matrix.get("profiles")
     if not isinstance(profiles, list) or len(profiles) != 1:
         raise CheckError("Showcase compatibility matrix must define exactly one legacy profile")
     profile = profiles[0]
     if not isinstance(profile, dict) or profile.get("id") != "legacy-bridge-v1":
         raise CheckError("Showcase compatibility matrix has an unexpected legacy profile")
-    sources = profile.get("sources")
-    if not isinstance(sources, list) or not sources:
-        raise CheckError("Showcase compatibility matrix sources are missing")
-    seen_sources: set[tuple[str, str]] = set()
-    for entry in sources:
-        if not isinstance(entry, dict):
-            raise CheckError("Showcase compatibility matrix contains an invalid source rule")
-        version = entry.get("version")
-        source_sha256 = entry.get("sourceSha256")
-        if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+(?:-beta\.\d+)?", version):
-            raise CheckError("Showcase compatibility matrix source version is invalid")
-        if not isinstance(source_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", source_sha256):
-            raise CheckError("Showcase compatibility matrix source SHA-256 is invalid")
-        key = (version, source_sha256)
-        if key in seen_sources:
-            raise CheckError("Showcase compatibility matrix contains a duplicate source rule")
-        seen_sources.add(key)
-    for key in (
-        ("1.5.7", "1d04eef5096db1d9aab9f8095ba9bf3dada1284b793cd6aa4b158f89b287c53a"),
-        ("1.5.8-beta.4", "cdae46b0c3e75189bd8a53b53429a939adb95d5132735eabf0522e53beb64d37"),
-    ):
-        if key not in seen_sources:
-            raise CheckError("Showcase compatibility matrix is missing a reviewed tested source rule")
+    if "sources" in profile:
+        raise CheckError("Showcase compatibility matrix must not retain brittle exact-archive source rules")
+    policy = profile.get("sourcePolicy")
+    if not isinstance(policy, dict):
+        raise CheckError("Showcase compatibility matrix source policy is missing")
+    if policy != {
+        "selection": "adapter-probe",
+        "minimumVersion": "1.5.7",
+        "maximumVersionExclusive": "1.6.0",
+    }:
+        raise CheckError("Showcase compatibility matrix has an unexpected adapter-probe window")
     checks = profile.get("requiredCandidateChecks")
     if checks != [
         "staged-linux-package-and-runtime-self-test",
@@ -290,12 +278,15 @@ def main() -> int:
         "requiredCandidateChecks",
         "SHOWCASE COMPATIBILITY ERROR",
         "source archive SHA-256 mismatch",
-        "add a reviewed exact-hash matrix entry",
+        "adapter-probe",
+        "maximumVersionExclusive",
+        "the adapters themselves are the final",
     ):
         if token not in bridge:
             raise CheckError(f"Showcase compatibility bridge is missing contract token: {token}")
-    if "manifest-verified" in bridge or "sourceHashMode" in bridge:
-        raise CheckError("Showcase compatibility bridge must not accept a broad manifest-only source rule")
+    for retired in ("add a reviewed exact-hash matrix entry", "sourceHashMode", "manifest-verified"):
+        if retired in bridge:
+            raise CheckError("Showcase compatibility bridge retains a broad or brittle retired selection path")
 
     linux_uninstall = (root / "packaging/linux/dash-go-showcase-studio-uninstall").read_text(encoding="utf-8")
     for token in ("--purge-state", "--purge", "--action purge", "apt-get purge", "id -u", "sudo"):

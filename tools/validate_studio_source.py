@@ -175,9 +175,13 @@ def main() -> int:
     for retired in ("Capture Gallery", "/api/launch", "Scenario", "id=\"reset\""):
         if retired in hub_html or retired in hub_js:
             raise CheckError(f"Studio Hub still exposes a retired scenario/reset surface: {retired}")
-    for token in ("prepareStudioChildCommand(cmd)", "func (a *App) prepareScenarioForLocation", "func (a *App) stopActiveRuntime", "DASHGO_SHOWCASE_DATA_ROOT", "DASHGO_RUNTIME_PROFILE=showcase", "DASHGO_SHOWCASE_MANIFEST=", "DASHGO_DATA_ROOT=", "nativeShowcaseContractAvailable", "a.paths.scenarioData", "cmd.Dir = a.paths.runtimeApp"):
+    for token in ("prepareStudioChildCommand(cmd)", "func (a *App) prepareScenarioForLocation", "func (a *App) stopActiveRuntime", "DASHGO_SHOWCASE_DATA_ROOT", "nativeShowcaseRuntimePlanAvailable", "nativePlan.launchEnvironment", "nativePlan.clientVisibleScenarioData", "a.paths.scenarioData", "cmd.Dir = a.paths.runtimeApp"):
         if token not in host_runtime:
             raise CheckError(f"Studio runtime isolation contract is missing: {token}")
+    host_runtime_plan = (root / "internal/studiohost/runtime_contract_plan.go").read_text(encoding="utf-8")
+    for token in ("//go:embed dashgo_runtime_contract_matrix.json", "loadNativeRuntimeContractPlan", "scenarioPaths", "stagedManifestPath", "launchEnvironment", "clientVisibleScenarioData", "writableCalendarRequirements"):
+        if token not in host_runtime_plan:
+            raise CheckError(f"Studio executable runtime-contract plan is missing: {token}")
     for retired in ("workspaceApp", "workspaceHome", "workspaceRoot", ".workspace-stage-", "copyTree(a.paths.runtimeApp"):
         if retired in host_runtime:
             raise CheckError(f"Studio runtime still contains a mutable executable-workspace pattern: {retired}")

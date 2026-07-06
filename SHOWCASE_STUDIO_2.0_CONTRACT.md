@@ -44,3 +44,19 @@ Dash-Go public API. It makes those dependencies explicit and testable while
 keeping Contract v1 narrow. An absent declaration may still use the reviewed
 legacy bridge; a malformed or incomplete declaration is never silently
 reinterpreted as legacy.
+
+## Executable native launch plan (Task 3.2)
+
+Studio embeds the same matrix into its host binary and compiles the native
+portion into one launch plan. When a packaged Dash-Go release declares native
+Contract v1, Studio derives the declaration path, activation environment names
+and values, disposable `scenario/data` root, manifest path, readiness/status
+routes, writable-calendar requirements, and browser route probes from that
+plan. It verifies that the matrix data root resolves beneath Studio's private
+state root and that the seeded manifest exists before it starts Dash-Go.
+
+The native status and browser checks also consume the plan directly. This
+removes duplicate hard-coded native capability, route, and calendar lists from
+the launcher while keeping legacy-only adapters explicitly separate. A bad
+embedded matrix, missing manifest, mismatched private data root, malformed
+native declaration, or incomplete status remains a fail-closed startup error.

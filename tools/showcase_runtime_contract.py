@@ -2,7 +2,9 @@
 """Shared native Showcase Contract v1 matrix loader and fail-closed validator."""
 from __future__ import annotations
 
+import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -215,3 +217,118 @@ def native_contract_error_message(payload: object, matrix: dict[str, Any], *, co
     if not defects:
         return None
     return context + " does not satisfy Studio runtime contract matrix:\n" + "\n".join(f"- {defect}" for defect in defects)
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def native_runtime_plan_evidence(
+    payload: object,
+    matrix: dict[str, Any],
+    *,
+    matrix_sha256: str,
+    declaration_sha256: str,
+) -> dict[str, Any]:
+    """Return the exact native plan proven by a validated Dash-Go declaration.
+
+    This is intentionally a compact, JSON-only witness. It carries no private
+    machine paths and can be re-derived by Windows from the staged contract.
+    """
+    message = native_contract_error_message(payload, matrix)
+    if message is not None:
+        raise RuntimeContractMatrixError(message)
+    if not isinstance(payload, dict):  # defensive; native_contract_error_message already rejects this.
+        raise RuntimeContractMatrixError("native contract declaration must be an object")
+    if not isinstance(matrix_sha256, str) or len(matrix_sha256) != 64:
+        raise RuntimeContractMatrixError("runtime contract matrix SHA-256 is invalid")
+    if not isinstance(declaration_sha256, str) or len(declaration_sha256) != 64:
+        raise RuntimeContractMatrixError("native contract declaration SHA-256 is invalid")
+
+    native = matrix["nativeContract"]
+    verified_capabilities = []
+    for row in native["requiredCapabilities"]:
+        verified_capabilities.append(
+            {
+                "id": row["id"],
+                "verified": True,
+                "reason": row["reason"],
+                "consumers": list(row["consumers"]),
+            }
+        )
+
+    writable_calendars = []
+    for calendar in native["calendars"]:
+        if calendar["mode"] == "writable":
+            writable_calendars.append(
+                {
+                    "source": calendar["source"],
+                    "expectedEventMarker": calendar["expectedEventMarker"],
+                    "minimumWritebackCandidates": calendar["minimumWritebackCandidates"],
+                }
+            )
+
+    return {
+        "schema": 1,
+        "contract": native_contract_name(matrix),
+        "matrix": {
+            "path": MATRIX_RELATIVE_PATH.as_posix(),
+            "sha256": matrix_sha256.lower(),
+        },
+        "declaration": {
+            "path": native_contract_declaration_path(matrix),
+            "sha256": declaration_sha256.lower(),
+            "schema": payload["schema"],
+            "contract": payload["contract"],
+        },
+        "verifiedCapabilities": verified_capabilities,
+        "resolvedRuntimePlan": {
+            "activation": deepcopy(native["activation"]),
+            "readiness": deepcopy(native["readiness"]),
+            "writableCalendars": writable_calendars,
+            "browserRoutes": deepcopy(native["browserRoutes"]),
+        },
+    }
+
+
+def native_runtime_plan_evidence_from_files(root: Path, declaration_path: Path) -> dict[str, Any]:
+    matrix = load_runtime_contract_matrix(root)
+    if not declaration_path.is_file():
+        raise RuntimeContractMatrixError(f"native contract declaration is missing: {declaration_path}")
+    try:
+        payload = json.loads(declaration_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeContractMatrixError(f"native contract declaration is invalid JSON: {exc}") from exc
+    return native_runtime_plan_evidence(
+        payload,
+        matrix,
+        matrix_sha256=sha256_file(matrix_path(root)),
+        declaration_sha256=sha256_file(declaration_path),
+    )
+
+
+def validate_native_runtime_plan_evidence(
+    evidence: object,
+    payload: object,
+    matrix: dict[str, Any],
+    *,
+    matrix_sha256: str,
+    declaration_sha256: str,
+) -> None:
+    expected = native_runtime_plan_evidence(
+        payload,
+        matrix,
+        matrix_sha256=matrix_sha256,
+        declaration_sha256=declaration_sha256,
+    )
+    if not isinstance(evidence, dict):
+        raise RuntimeContractMatrixError("native runtime plan evidence must be a JSON object")
+    if set(evidence) != set(expected):
+        raise RuntimeContractMatrixError("native runtime plan evidence has an unexpected field set")
+    for field, value in expected.items():
+        if evidence.get(field) != value:
+            raise RuntimeContractMatrixError(f"native runtime plan evidence mismatch at {field}")

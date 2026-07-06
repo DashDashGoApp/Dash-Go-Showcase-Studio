@@ -72,3 +72,13 @@ state root, never the immutable runtime application root. Before launch,
 Studio requires the resolved data root to be exactly its private scenario data
 path and the seeded manifest to exist. Legacy bridge environment variables and
 legacy-only checks remain in their isolated fallback branch.
+
+## Candidate runtime-plan evidence (Task 3.3)
+
+Every native Stage Candidate now emits a compact `nativeRuntimePlan` witness in
+`candidate-provenance.json`. It records the exact checked-in matrix hash, the
+staged `release/showcase-contract.json` hash, the resolved activation/readiness
+plan, browser probes, writable-calendar rules, and every capability that Stage
+verified. The Windows candidate extracts the packaged declaration and re-derives
+the witness from the checked-out matrix before packaging; a mismatch fails before
+the installer smoke. Legacy candidates carry no native runtime-plan witness.

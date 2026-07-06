@@ -123,6 +123,17 @@ dashgo_hash = required_sha256(manifest["dashGoSourceSha256"], "manifest Dash-Go 
 showcase_runtime_mode = required_string(summary.get("showcaseRuntimeMode"), "staging showcaseRuntimeMode")
 if showcase_runtime_mode not in ("legacy-bridge", "native-contract"):
     raise SystemExit("staging showcaseRuntimeMode is invalid")
+native_runtime_plan = summary.get("nativeRuntimePlan")
+if showcase_runtime_mode == "native-contract":
+    if not isinstance(native_runtime_plan, dict):
+        raise SystemExit("native staging summary lacks resolved nativeRuntimePlan evidence")
+    if native_runtime_plan.get("schema") != 1 or native_runtime_plan.get("contract") != NATIVE_SHOWCASE_CONTRACT:
+        raise SystemExit("native staging summary has invalid nativeRuntimePlan evidence")
+    if not isinstance(native_runtime_plan.get("verifiedCapabilities"), list) or not native_runtime_plan["verifiedCapabilities"]:
+        raise SystemExit("native staging summary lacks verified capability evidence")
+else:
+    if native_runtime_plan is not None:
+        raise SystemExit("legacy staging summary must not carry nativeRuntimePlan evidence")
 
 if origin_argument:
     origin_path = Path(origin_argument).resolve()
@@ -271,6 +282,7 @@ provenance = {
     "studioCommit": studio_commit,
     "dashGoSourceSha256": dashgo_hash,
     "showcaseRuntimeMode": showcase_runtime_mode,
+    "nativeRuntimePlan": native_runtime_plan,
     "dashGoRelease": origin.get("dashGoRelease"),
     "artifacts": {
         linux_output.name: sha256(linux_output),
@@ -280,6 +292,8 @@ provenance = {
 if draft_prepublication:
     provenance["schema"] = 3
 if native_beta:
+    if not isinstance(native_runtime_plan, dict):
+        raise SystemExit("beta native candidate lacks resolved nativeRuntimePlan evidence")
     provenance["nativeShowcaseContract"] = NATIVE_SHOWCASE_CONTRACT
 
 (output / "candidate-provenance.json").write_text(

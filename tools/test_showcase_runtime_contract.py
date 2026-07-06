@@ -13,7 +13,9 @@ from showcase_runtime_contract import (  # noqa: E402
     load_runtime_contract_matrix,
     native_contract_defects,
     native_contract_error_message,
+    native_runtime_plan_evidence,
     required_capabilities,
+    validate_native_runtime_plan_evidence,
     validate_runtime_contract_matrix,
 )
 
@@ -50,6 +52,37 @@ def main() -> int:
     require(message is not None and message.startswith("Dash-Go Showcase contract does not satisfy Studio runtime contract matrix:"), "matrix error lacks fail-closed prefix")
     require("- missing capability 'statusEndpoint'" in message, "matrix error lacks precise status capability detail")
     require("- missing capability 'staticScenarioAssets'" in message, "matrix error lacks precise browser capability detail")
+
+    evidence = native_runtime_plan_evidence(
+        contract,
+        matrix,
+        matrix_sha256="a" * 64,
+        declaration_sha256="b" * 64,
+    )
+    require(evidence["contract"] == "dashgo-showcase/v1", "evidence lacks native contract identity")
+    require(len(evidence["verifiedCapabilities"]) == len(required_capabilities(matrix)), "evidence does not enumerate every verified capability")
+    require(evidence["resolvedRuntimePlan"]["activation"]["dataRoot"]["relativePath"] == "scenario/data", "evidence does not preserve the resolved private data-root plan")
+    validate_native_runtime_plan_evidence(
+        evidence,
+        contract,
+        matrix,
+        matrix_sha256="a" * 64,
+        declaration_sha256="b" * 64,
+    )
+    tampered = copy.deepcopy(evidence)
+    tampered["verifiedCapabilities"][0]["verified"] = False
+    try:
+        validate_native_runtime_plan_evidence(
+            tampered,
+            contract,
+            matrix,
+            matrix_sha256="a" * 64,
+            declaration_sha256="b" * 64,
+        )
+    except RuntimeContractMatrixError as exc:
+        require("verifiedCapabilities" in str(exc), f"tampered evidence failure is not precise: {exc}")
+    else:
+        raise AssertionError("tampered verified capability evidence did not fail")
 
     wrong_shape = {"schema": 1, "contract": "dashgo-showcase/v1", "capabilities": []}
     shape_defects = native_contract_defects(wrong_shape, matrix)

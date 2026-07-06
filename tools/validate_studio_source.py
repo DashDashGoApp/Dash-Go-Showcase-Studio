@@ -182,6 +182,10 @@ def main() -> int:
     for token in ("//go:embed dashgo_runtime_contract_matrix.json", "loadNativeRuntimeContractPlan", "scenarioPaths", "stagedManifestPath", "launchEnvironment", "clientVisibleScenarioData", "writableCalendarRequirements"):
         if token not in host_runtime_plan:
             raise CheckError(f"Studio executable runtime-contract plan is missing: {token}")
+    native_provenance_validator = (root / "tools/validate_studio_native_candidate_provenance.py").read_text(encoding="utf-8")
+    for token in ("validate_native_runtime_plan_evidence", "candidate provenance is not a native beta candidate", "staged Contract v1 declaration"):
+        if token not in native_provenance_validator:
+            raise CheckError(f"Studio native runtime-plan provenance validator is missing: {token}")
     for retired in ("workspaceApp", "workspaceHome", "workspaceRoot", ".workspace-stage-", "copyTree(a.paths.runtimeApp"):
         if retired in host_runtime:
             raise CheckError(f"Studio runtime still contains a mutable executable-workspace pattern: {retired}")

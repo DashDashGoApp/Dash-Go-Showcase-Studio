@@ -31,6 +31,8 @@ from tools.showcase_runtime_contract import (
     load_runtime_contract_matrix,
     native_contract_error_message,
     native_contract_name,
+    native_runtime_plan_evidence,
+    matrix_path,
 )
 
 sys.dont_write_bytecode = True
@@ -125,6 +127,7 @@ class Context:
     build_id: str
     plan: PerformancePlan
     showcase_runtime_mode: str = "unknown"
+    native_runtime_plan: dict | None = None
     lock: threading.Lock = dataclasses.field(default_factory=threading.Lock)
     timings: list[dict[str, int | str]] = dataclasses.field(default_factory=list)
 
@@ -938,13 +941,21 @@ def main() -> int:
                 native_contract, native_contract_matrix = native_contract_selection
                 ctx.showcase_runtime_mode = "native-contract"
                 verify_native_showcase_runtime_contract(app, native_contract, native_contract_matrix)
+                declaration = app / str(native_contract_matrix["nativeContract"]["declarationPath"])
+                ctx.native_runtime_plan = native_runtime_plan_evidence(
+                    native_contract,
+                    native_contract_matrix,
+                    matrix_sha256=sha256(matrix_path(SOURCE_ROOT)),
+                    declaration_sha256=sha256(declaration),
+                )
                 write_json(compatibility_report, {
-                    "schema": 3,
+                    "schema": 4,
                     "result": "PASS",
                     "mode": "native-contract",
                     "contract": native_contract_name(native_contract_matrix),
                     "dashGoVersion": ctx.dashgo_version,
                     "legacyAdaptersApplied": False,
+                    "nativeRuntimePlan": ctx.native_runtime_plan,
                 })
                 print(f"PASS: selected native Dash-Go Showcase contract for {ctx.dashgo_version}")
             else:
@@ -1050,7 +1061,7 @@ def main() -> int:
                 (root / "dash-go-showcase-studio").chmod(0o755)
                 run(ctx, "Showcase runtime self-test", [str(root / "dash-go-showcase-studio"), "--action", "self-test", "--scenario", str(ctx.manifest["defaultScenario"]), "--state-root", str(work / "smoke/runtime-state")], cwd=root, timeout=180)
         write_json(work / "timing.json", {"schema": 1, "performance": plan.as_json(), "phases": ctx.timings, "totalDurationMs": round((time.monotonic() - ctx.started) * 1000)})
-        summary = {"schema": 1, "result": "PASS", "buildID": ctx.build_id, "studioVersion": ctx.version, "releasePackageVersion": ctx.release_package_version, "dashGoVersion": ctx.dashgo_version, "showcaseRuntimeMode": ctx.showcase_runtime_mode, "targets": list(ctx.targets), "windowsStage": str(windows_stage) if windows_stage else "", "linuxDeb": str(linux_deb) if linux_deb else "", "events": str(ctx.events_path), "work": str(ctx.work), "performance": plan.as_json(), "timing": str(work / "timing.json"), "finishedAt": now_utc()}
+        summary = {"schema": 1, "result": "PASS", "buildID": ctx.build_id, "studioVersion": ctx.version, "releasePackageVersion": ctx.release_package_version, "dashGoVersion": ctx.dashgo_version, "showcaseRuntimeMode": ctx.showcase_runtime_mode, "nativeRuntimePlan": ctx.native_runtime_plan, "targets": list(ctx.targets), "windowsStage": str(windows_stage) if windows_stage else "", "linuxDeb": str(linux_deb) if linux_deb else "", "events": str(ctx.events_path), "work": str(ctx.work), "performance": plan.as_json(), "timing": str(work / "timing.json"), "finishedAt": now_utc()}
         write_json(work / "summary.json", summary)
         run_state = json.loads((work / "run.json").read_text(encoding="utf-8"))
         run_state.update({"status": "passed", "finishedAt": now_utc()})

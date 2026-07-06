@@ -34,6 +34,7 @@ def main() -> int:
     matrix_test = root / "tools/test_showcase_runtime_contract.py"
     stage_packager = root / "ci/stage-package.py"
     package = root / "ci/package-ubuntu.sh"
+    provenance_validator = root / "tools/validate_studio_native_candidate_provenance.py"
 
     require_text(
         preflight,
@@ -97,6 +98,8 @@ def main() -> int:
         '"showcaseRuntimeMode": ctx.showcase_runtime_mode',
         "native Showcase candidate must not carry legacy overlay source",
         "beta native candidate releasePackageVersion",
+        "native_runtime_plan_evidence",
+        '"nativeRuntimePlan": ctx.native_runtime_plan',
     )
     require_text(
         package,
@@ -105,6 +108,14 @@ def main() -> int:
         "beta-release candidate must stage the native Showcase contract without legacy overlays",
         '"showcaseRuntimeMode": showcase_runtime_mode',
         'provenance["nativeShowcaseContract"] = NATIVE_SHOWCASE_CONTRACT',
+        '"nativeRuntimePlan": native_runtime_plan',
+        "verified capability evidence",
+    )
+    require_text(
+        provenance_validator,
+        "validate_native_runtime_plan_evidence",
+        "candidate provenance is not a native beta candidate",
+        "staged Contract v1 declaration",
     )
     require_text(
         windows,
@@ -114,6 +125,9 @@ def main() -> int:
         "beta native contract Windows package candidate only",
         "Windows beta candidate must inherit native Showcase Contract v1 evidence from Stage.",
         "nativeShowcaseContract = [string]$stageProvenance.nativeShowcaseContract",
+        "validate_studio_native_candidate_provenance.py",
+        "showcase-contract.json",
+        "nativeRuntimePlan = $stageProvenance.nativeRuntimePlan",
     )
 
     print("Studio native Showcase Contract beta lane source is internally consistent.")

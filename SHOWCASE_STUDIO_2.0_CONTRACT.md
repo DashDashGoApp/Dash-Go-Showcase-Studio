@@ -60,3 +60,13 @@ removes duplicate hard-coded native capability, route, and calendar lists from
 the launcher while keeping legacy-only adapters explicitly separate. A bad
 embedded matrix, missing manifest, mismatched private data root, malformed
 native declaration, or incomplete status remains a fail-closed startup error.
+
+## Candidate runtime-plan evidence (Task 3.3)
+
+For a native candidate, `candidate-provenance.json` is both release identity
+evidence and a reproducible runtime-plan witness. It binds the Studio matrix and
+the packaged Dash-Go declaration by SHA-256, lists the capabilities verified as
+true, and records the activation, readiness, writable-calendar, and browser
+route plan that Studio will use. The Windows installer lane re-derives and
+compares that witness from its staged package before it builds or launches the
+installer.

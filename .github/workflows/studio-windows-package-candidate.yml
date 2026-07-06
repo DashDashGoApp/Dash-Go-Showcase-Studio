@@ -245,6 +245,20 @@ jobs:
               throw "The Windows staging archive does not contain the expected windows directory: $stageDir"
           }
 
+          if ($candidateOrigin -eq 'dashgo-beta-release') {
+              $nativeContractPath = Join-Path $stageDir 'runtime\app\release\showcase-contract.json'
+              if (-not (Test-Path -LiteralPath $nativeContractPath -PathType Leaf)) {
+                  throw "Native beta Windows payload lacks showcase-contract.json: $nativeContractPath"
+              }
+              python tools/validate_studio_native_candidate_provenance.py `
+                  --root . `
+                  --provenance $provenancePath `
+                  --contract $nativeContractPath
+              if ($LASTEXITCODE -ne 0) {
+                  throw 'Native beta candidate provenance does not match the staged Contract v1 declaration and resolved runtime plan.'
+              }
+          }
+
           "stage_dir=$stageDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "candidate_dir=$candidateRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "stage_run_id=$stageRunID" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -421,6 +435,7 @@ jobs:
               dashGoSourceSha256 = [string]$stageProvenance.dashGoSourceSha256
               showcaseRuntimeMode = [string]$stageProvenance.showcaseRuntimeMode
               nativeShowcaseContract = [string]$stageProvenance.nativeShowcaseContract
+              nativeRuntimePlan = $stageProvenance.nativeRuntimePlan
               dashGoRelease = $stageProvenance.dashGoRelease
               innoVersion = $env:INNO_VERSION
           } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputRoot 'windows-package-provenance.json') -Encoding utf8

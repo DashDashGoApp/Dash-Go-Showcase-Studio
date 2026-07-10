@@ -30,12 +30,14 @@ def main() -> int:
     package = root / "ci" / "package-ubuntu.sh"
     intake = root / "tools" / "prepare_dashgo_release.py"
     test = root / "tools" / "test_prepare_dashgo_release_prepublication.py"
+    stage_native_test = root / "tools" / "test_stage_package_native_contract.py"
     intake_doc = root / "PREPUBLICATION_CANDIDATE_INTAKE.md"
 
     require_text(
         preflight,
         "tools/validate_studio_prepublication_bridge.py --root .",
         "python3 tools/test_prepare_dashgo_release_prepublication.py",
+        "python3 tools/test_stage_package_native_contract.py",
     )
     require_text(
         stage,
@@ -101,6 +103,13 @@ def main() -> int:
         "DashDashGoApp/Dash-Go",
         "draft prepublication package candidate only",
         "neither publishes the Dash-Go draft",
+    )
+
+    require_text(
+        stage_native_test,
+        "showcase_tour_guard_view_contract",
+        "Runtime contract matrix",
+        "exact Phase 4 native path",
     )
 
     print("Studio draft-prepublication bridge source is internally consistent.")

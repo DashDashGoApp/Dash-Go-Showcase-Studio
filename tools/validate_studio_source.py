@@ -2,6 +2,7 @@
 """Fast deterministic source contract checks for Dash-Go Showcase Studio."""
 from __future__ import annotations
 import argparse
+import ast
 import hashlib
 import json
 import re
@@ -31,6 +32,38 @@ def assert_stage_packager_syntax_and_r7_phase(root: Path) -> None:
         compile(text, str(path), "exec")
     except SyntaxError as exc:
         raise CheckError(f"ci/stage-package.py has invalid Python syntax: {exc.msg} (line {exc.lineno})") from exc
+
+    tree = ast.parse(text, filename=str(path))
+    expected_arities = {
+        "verify_native_showcase_runtime_contract": 3,
+        "showcase_tour_guard_view_contract": 4,
+    }
+    definitions = {
+        node.name: node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in expected_arities
+    }
+    for name, expected in expected_arities.items():
+        definition = definitions.get(name)
+        if definition is None:
+            raise CheckError(f"ci/stage-package.py is missing required function: {name}")
+        positional = len(definition.args.posonlyargs) + len(definition.args.args)
+        if positional != expected or definition.args.vararg is not None:
+            raise CheckError(
+                f"ci/stage-package.py {name} must declare exactly {expected} positional arguments"
+            )
+        calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == name
+        ]
+        if not calls:
+            raise CheckError(f"ci/stage-package.py never calls required function: {name}")
+        for call in calls:
+            if len(call.args) != expected or call.keywords:
+                raise CheckError(
+                    f"ci/stage-package.py call to {name} must supply exactly {expected} positional arguments"
+                )
 
     lines = text.splitlines()
     bridge = [index for index, line in enumerate(lines) if '"Apply Dash-Go Showcase compatibility profile"' in line]
@@ -75,8 +108,8 @@ def main() -> int:
         raise CheckError("studioVersion must use X.Y.Z or X.Y.Z-test.N")
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:-beta\.\d+)?", manifest["dashGoVersion"]):
         raise CheckError("dashGoVersion must use X.Y.Z or X.Y.Z-beta.N")
-    if manifest["goToolchain"] != "1.26.4":
-        raise CheckError("current Studio source requires Go toolchain 1.26.4")
+    if manifest["goToolchain"] != "1.26.5":
+        raise CheckError("current Studio source requires Go toolchain 1.26.5")
     dashgo_root = f"dash-go-source-{manifest['dashGoVersion']}"
     source = root / manifest["dashGoSourceArchive"]
     if not source.is_file():
@@ -105,6 +138,7 @@ def main() -> int:
         "tools/run_legacy_bridge_candidate.py", "tools/test_run_legacy_bridge_candidate.py",
         "tools/validate_studio_legacy_bridge_candidate.py", "tools/validate_studio_native_contract_beta.py", "tools/test_prepare_dashgo_release_beta.py",
         "tools/validate_studio_prepublication_bridge.py", "tools/test_prepare_dashgo_release_prepublication.py",
+        "tools/test_stage_package_native_contract.py",
         ".github/workflows/studio-prepublish-candidate.yml",
         ".github/workflows/studio-legacy-bridge-candidate.yml", "PREPUBLICATION_CANDIDATE_INTAKE.md",
         "packaging/windows/DashGoShowcaseStudio.iss", "WHAT-STUDIO-DOES-LOCALLY.txt",

@@ -66,6 +66,8 @@ def main() -> int:
     preflight = root / ".github/workflows/studio-preflight.yml"
     stage_workflow = root / ".github/workflows/studio-stage-candidate.yml"
     beta_validator = root / "tools/validate_studio_native_contract_beta.py"
+    stage_native_test = root / "tools/test_stage_package_native_contract.py"
+    prepublish_workflow = root / ".github/workflows/studio-prepublish-candidate.yml"
 
     require_text(
         runtime,
@@ -114,16 +116,27 @@ def main() -> int:
         preflight,
         "tools/validate_studio_runtime_contract_matrix.py --root .",
         "tools/test_showcase_runtime_contract.py",
+        "tools/test_stage_package_native_contract.py",
     )
     require_text(
         stage_workflow,
         "tools/validate_studio_runtime_contract_matrix.py --root .",
         "tools/test_showcase_runtime_contract.py",
+        "tools/test_stage_package_native_contract.py",
     )
     require_text(
         beta_validator,
         "validate_studio_runtime_contract_matrix.py",
         "test_showcase_runtime_contract.py",
+    )
+    require_text(
+        prepublish_workflow,
+        "tools/test_stage_package_native_contract.py",
+    )
+    require_text(
+        stage_native_test,
+        "showcase_tour_guard_view_contract",
+        "Runtime contract matrix",
     )
 
     print(

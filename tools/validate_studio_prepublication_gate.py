@@ -51,6 +51,7 @@ def main() -> int:
         "tools/validate_studio_prepublication_gate.py --root .",
         "tools/validate_studio_prepublication_bridge.py --root .",
         "python3 tools/test_prepare_dashgo_release_prepublication.py",
+        "python3 tools/test_stage_package_native_contract.py",
         "tools/validate_studio_stable_release_bridge.py --root .",
         "tools/validate_studio_windows_candidate.py --root .",
         "go test -count=1 -race ./...",

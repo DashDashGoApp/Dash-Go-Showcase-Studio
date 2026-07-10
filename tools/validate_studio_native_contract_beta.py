@@ -32,6 +32,7 @@ def main() -> int:
     intake_test = root / "tools/test_prepare_dashgo_release_beta.py"
     matrix_validator = root / "tools/validate_studio_runtime_contract_matrix.py"
     matrix_test = root / "tools/test_showcase_runtime_contract.py"
+    stage_native_test = root / "tools/test_stage_package_native_contract.py"
     stage_packager = root / "ci/stage-package.py"
     package = root / "ci/package-ubuntu.sh"
     provenance_validator = root / "tools/validate_studio_native_candidate_provenance.py"
@@ -40,6 +41,7 @@ def main() -> int:
         preflight,
         "tools/validate_studio_runtime_contract_matrix.py --root .",
         "python3 tools/test_showcase_runtime_contract.py",
+        "python3 tools/test_stage_package_native_contract.py",
         "tools/validate_studio_native_contract_beta.py --root .",
         "python3 tools/test_prepare_dashgo_release_beta.py",
     )
@@ -49,6 +51,7 @@ def main() -> int:
         "immutable native-contract beta release",
         "tools/validate_studio_runtime_contract_matrix.py --root .",
         "tools/test_showcase_runtime_contract.py",
+        "tools/test_stage_package_native_contract.py",
         "tools/validate_studio_native_contract_beta.py --root .",
         "tools/test_prepare_dashgo_release_beta.py",
         "candidate_origin:",
@@ -86,6 +89,12 @@ def main() -> int:
         "missing capability",
         "native.status-readiness",
         "native.browser-routes",
+    )
+    require_text(
+        stage_native_test,
+        "showcase_tour_guard_view_contract",
+        "Runtime contract matrix",
+        "exact Phase 4 native path",
     )
     require_text(
         stage_packager,

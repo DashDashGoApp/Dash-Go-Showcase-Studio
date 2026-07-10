@@ -382,8 +382,8 @@ def validate_manifest(ctx: Context) -> None:
             expected = re.escape(ctx.dashgo_version)
             if not re.fullmatch(expected + r"(?:-r[1-9]\d*)?", ctx.release_package_version):
                 raise BuildFailure("", "Manifest", "stable releasePackageVersion must equal dashGoVersion or dashGoVersion-rN")
-    if ctx.manifest.get("goToolchain") != "1.26.4":
-        raise BuildFailure("", "Manifest", "this Builder requires Go 1.26.4")
+    if ctx.manifest.get("goToolchain") != "1.26.5":
+        raise BuildFailure("", "Manifest", "this Builder requires Go 1.26.5")
     if str(ctx.manifest.get("dashGoSourceArchive")) != f"engine/Dash-Go_{ctx.dashgo_version}_source.tar.gz":
         raise BuildFailure("", "Manifest", "Dash-Go archive path must match the pinned dashGoVersion")
 
@@ -464,9 +464,20 @@ def js_syntax_checks(ctx: Context, app: Path) -> None:
             future.result()
 
 
-def showcase_tour_guard_view_contract(ctx: Context, app: Path, native_contract: dict | None) -> None:
+def showcase_tour_guard_view_contract(
+    ctx: Context,
+    app: Path,
+    native_contract: dict | None,
+    native_contract_matrix: dict | None,
+) -> None:
     if native_contract is not None:
-        verify_native_showcase_runtime_contract(app, native_contract)
+        if native_contract_matrix is None:
+            raise BuildFailure(
+                "Native Showcase Contract v1",
+                "Runtime contract matrix",
+                "native Showcase contract selection is missing its validated runtime-contract matrix",
+            )
+        verify_native_showcase_runtime_contract(app, native_contract, native_contract_matrix)
         return
     phase_name = "Showcase Tour, guard, and viewport contract"
     js_manifest = json.loads((app / "ui/js/bundle.manifest.json").read_text(encoding="utf-8"))
@@ -920,8 +931,8 @@ def main() -> int:
             source_privacy_sanity(ctx)
         with phase(ctx, 2, "Verify tools and pinned Go compiler"):
             need_file(Path(ctx.go), "selected Go compiler", "")
-            if "go1.26.4" not in run(ctx, "Go compiler verification", [ctx.go, "version"], cwd=source, timeout=120):
-                raise BuildFailure("", "Toolchain", "selected Go compiler is not 1.26.4")
+            if "go1.26.5" not in run(ctx, "Go compiler verification", [ctx.go, "version"], cwd=source, timeout=120):
+                raise BuildFailure("", "Toolchain", "selected Go compiler is not 1.26.5")
             run(ctx, "Node verification", [ctx.node, "--version"], cwd=source, timeout=120)
             if "linux" in ctx.targets:
                 run(ctx, "dpkg-deb verification", ["dpkg-deb", "--version"], cwd=source, timeout=120)
@@ -981,7 +992,7 @@ def main() -> int:
             run(ctx, "Generate Dash-Go browser assets", [sys.executable, str(source / "tools/generate_dashgo_assets.py"), "--app", str(app)], cwd=source, timeout=240)
             run(ctx, "Verify Dash-Go browser assets", [sys.executable, str(source / "tools/generate_dashgo_assets.py"), "--app", str(app), "--verify"], cwd=source, timeout=240)
             js_syntax_checks(ctx, app)
-            showcase_tour_guard_view_contract(ctx, app, native_contract)
+            showcase_tour_guard_view_contract(ctx, app, native_contract, native_contract_matrix)
         with phase(ctx, 5, "Test Studio host and fixture contracts"):
             run(ctx, "Studio host tests", [ctx.go, "test", "-count=1", "-p", str(ctx.plan.test_p), "./..."], cwd=source, env=go_test_network_env(ctx), timeout=900)
         with phase(ctx, 6, "Validate patched Dash-Go runtime"):

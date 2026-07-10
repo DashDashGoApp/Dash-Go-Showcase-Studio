@@ -4,7 +4,7 @@
   "dashGoVersion": "1.5.2",
   "dashGoSourceArchive": "engine/Dash-Go_1.5.2_source.tar.gz",
   "dashGoSourceSha256": "e57ff2d1b747c4ca590cb4b30161902d6a8d78c60b61cfc120df8e00b89347c8",
-  "goToolchain": "1.26.4",
+  "goToolchain": "1.26.5",
   "fixtureSchema": 2,
   "scenarioCatalog": 2,
   "supportedTargets": [

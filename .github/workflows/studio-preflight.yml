@@ -50,7 +50,7 @@ jobs:
       - name: Set up pinned Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26.4'
+          go-version: '1.26.5'
           check-latest: false
           cache: false
 
@@ -100,6 +100,7 @@ jobs:
           set -euo pipefail
           python3 tools/validate_studio_runtime_contract_matrix.py --root .
           python3 tools/test_showcase_runtime_contract.py
+          python3 tools/test_stage_package_native_contract.py
           python3 tools/validate_studio_native_contract_beta.py --root .
           python3 tools/test_prepare_dashgo_release_beta.py
 
@@ -115,7 +116,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(go env GOVERSION)" = "go1.26.4"
+          test "$(go env GOVERSION)" = "go1.26.5"
 
       - name: Verify Go formatting
         shell: bash

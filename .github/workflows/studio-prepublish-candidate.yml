@@ -112,6 +112,7 @@ jobs:
           set -euo pipefail
           python3 tools/validate_studio_prepublication_bridge.py --root .
           python3 tools/test_prepare_dashgo_release_prepublication.py
+          python3 tools/test_generate_dashgo_assets.py --go "$(go env GOROOT)/bin/go"
           python3 tools/test_stage_package_native_contract.py
 
       - name: Materialize isolated candidate source from Dash-Go draft release

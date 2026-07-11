@@ -70,3 +70,19 @@ true, and records the activation, readiness, writable-calendar, and browser
 route plan that Studio will use. The Windows installer lane re-derives and
 compares that witness from its staged package before it builds or launches the
 installer.
+
+## Source-owned browser asset generation
+
+Studio does not reimplement current Dash-Go JavaScript or CSS bundle semantics.
+When a staged source exposes
+`cmd/dashboard-control-server/runtime_assets.go`, Studio runs that source-owned
+implementation with the selected pinned Go compiler for both generation and
+verification. This keeps minification, identifier-retention, manifest order,
+headers, cache-buster checks, and future generated-asset rules identical to the
+Dash-Go runtime that will later verify and serve the package.
+
+The manifest-only Python generator is a legacy fallback solely for reviewed
+older sources that do not expose the standalone runtime-assets implementation.
+A source-owned implementation that fails to compile, generate, or verify is a
+blocking compatibility failure; Studio never silently falls back to its legacy
+generator after selecting the source-owned path.

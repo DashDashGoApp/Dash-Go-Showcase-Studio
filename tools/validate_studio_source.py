@@ -89,6 +89,8 @@ def assert_stage_packager_syntax_and_r7_phase(root: Path) -> None:
         "verify_native_showcase_runtime_contract",
         "legacyAdaptersApplied",
         "showcaseRuntimeMode",
+        '"--go"',
+        "asset_generator",
     ):
         if token not in text:
             raise CheckError(f"ci/stage-package.py Showcase runtime selection is missing: {token}")
@@ -138,7 +140,7 @@ def main() -> int:
         "tools/run_legacy_bridge_candidate.py", "tools/test_run_legacy_bridge_candidate.py",
         "tools/validate_studio_legacy_bridge_candidate.py", "tools/validate_studio_native_contract_beta.py", "tools/test_prepare_dashgo_release_beta.py",
         "tools/validate_studio_prepublication_bridge.py", "tools/test_prepare_dashgo_release_prepublication.py",
-        "tools/test_stage_package_native_contract.py",
+        "tools/test_stage_package_native_contract.py", "tools/test_generate_dashgo_assets.py",
         ".github/workflows/studio-prepublish-candidate.yml",
         ".github/workflows/studio-legacy-bridge-candidate.yml", "PREPUBLICATION_CANDIDATE_INTAKE.md",
         "packaging/windows/DashGoShowcaseStudio.iss", "WHAT-STUDIO-DOES-LOCALLY.txt",
@@ -190,6 +192,36 @@ def main() -> int:
     r7_patcher = (root / "tools/patch_dashgo_r7.py").read_text(encoding="utf-8")
     stage_packager = (root / "ci/stage-package.py").read_text(encoding="utf-8")
     assert_stage_packager_syntax_and_r7_phase(root)
+    asset_generator = (root / "tools/generate_dashgo_assets.py").read_text(encoding="utf-8")
+    for token in (
+        "RUNTIME_ASSETS_REL",
+        "run_source_owned_generator",
+        "verifyGeneratedAssets",
+        'env.update({"GOTOOLCHAIN": "local", "GOWORK": "off", "GOFLAGS": "-mod=readonly"})',
+        "run_legacy_generator",
+        "--go is required",
+    ):
+        if token not in asset_generator:
+            raise CheckError(f"Studio generated-asset bridge is missing: {token}")
+    if "minifyjs" in asset_generator or "tdewolff" in asset_generator:
+        raise CheckError("Studio generated-asset bridge must not duplicate Dash-Go minifier semantics")
+    for workflow in (
+        ".github/workflows/studio-preflight.yml",
+        ".github/workflows/studio-prepublish-candidate.yml",
+        ".github/workflows/studio-stage-candidate.yml",
+    ):
+        workflow_text = (root / workflow).read_text(encoding="utf-8")
+        if 'python3 tools/test_generate_dashgo_assets.py --go "$(go env GOROOT)/bin/go"' not in workflow_text:
+            raise CheckError(f"{workflow} does not run the generated-asset bridge regression")
+    generated_asset_contract = (root / "SHOWCASE_STUDIO_2.0_CONTRACT.md").read_text(encoding="utf-8")
+    for token in (
+        "Source-owned browser asset generation",
+        "cmd/dashboard-control-server/runtime_assets.go",
+        "manifest-only Python generator is a legacy fallback",
+        "never silently falls back",
+    ):
+        if token not in generated_asset_contract:
+            raise CheckError(f"Studio generated-asset ownership contract is missing: {token}")
     for token in ("case \"purge\"", "func (a *App) purge() error", "validatePurgeRequest", "requireRuntime := normalized.Action != \"clean\" && normalized.Action != \"purge\""):
         if token not in host_app:
             raise CheckError(f"Studio host is missing guarded full-state purge contract: {token}")

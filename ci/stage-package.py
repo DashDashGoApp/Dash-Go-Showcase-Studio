@@ -989,8 +989,16 @@ def main() -> int:
                 )
                 verify_showcase_overlay_formatting(ctx, app)
         with phase(ctx, 4, "Generate and validate browser assets"):
-            run(ctx, "Generate Dash-Go browser assets", [sys.executable, str(source / "tools/generate_dashgo_assets.py"), "--app", str(app)], cwd=source, timeout=240)
-            run(ctx, "Verify Dash-Go browser assets", [sys.executable, str(source / "tools/generate_dashgo_assets.py"), "--app", str(app), "--verify"], cwd=source, timeout=240)
+            asset_generator = [
+                sys.executable,
+                str(source / "tools/generate_dashgo_assets.py"),
+                "--app",
+                str(app),
+                "--go",
+                ctx.go,
+            ]
+            run(ctx, "Generate Dash-Go browser assets", asset_generator, cwd=source, timeout=600)
+            run(ctx, "Verify Dash-Go browser assets", [*asset_generator, "--verify"], cwd=source, timeout=600)
             js_syntax_checks(ctx, app)
             showcase_tour_guard_view_contract(ctx, app, native_contract, native_contract_matrix)
         with phase(ctx, 5, "Test Studio host and fixture contracts"):

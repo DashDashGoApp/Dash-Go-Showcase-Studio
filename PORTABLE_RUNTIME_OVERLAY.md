@@ -82,3 +82,12 @@ plan, browser probes, writable-calendar rules, and every capability that Stage
 verified. The Windows candidate extracts the packaged declaration and re-derives
 the witness from the checked-out matrix before packaging; a mismatch fails before
 the installer smoke. Legacy candidates carry no native runtime-plan witness.
+
+## Browser asset ownership
+
+The legacy bridge may retain Studio's manifest-only browser-asset generator only
+for a reviewed source that lacks Dash-Go's standalone
+`runtime_assets.go` implementation. Whenever that implementation is present,
+Studio invokes it with the pinned Go compiler and treats it as authoritative.
+Studio never substitutes the legacy concatenation path after a source-owned
+generator has been detected.

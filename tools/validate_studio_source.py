@@ -356,6 +356,12 @@ def main() -> int:
     native_view = (root / "tools/native_extension_assets/showcase-view.js").read_text(encoding="utf-8")
     native_calendar = (root / "tools/native_extension_assets/showcase-calendar-sandbox.js").read_text(encoding="utf-8")
     for token in (
+        'view_asset = Path(__file__).resolve().parent / "native_extension_assets/showcase-view.js"',
+        'write(view, view_asset.read_text(encoding="utf-8"))',
+    ):
+        if token not in patcher:
+            raise CheckError(f"Studio legacy bridge does not reuse the shared viewport asset: {token}")
+    for token in (
         "Device previews preserve the selected CSS aspect ratio",
         "hostWidth",
         "hostHeight",

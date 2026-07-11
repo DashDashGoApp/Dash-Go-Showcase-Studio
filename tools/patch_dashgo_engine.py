@@ -1748,43 +1748,13 @@ func (a *app) archiveLocalCalendar''',
   };
 })();''')
 
-    # R6 presentation controls distinguish large native presentation sizing from
-    # exact device preview emulation. They remain session-only and never touch
-    # Windows display scale/settings.
-    write(view, r'''(function(){
-  const query=new URLSearchParams(window.location.search);
-  if(query.get("showcaseStudio")!=="1")return;
-  const hubURL=query.get("showcaseHub")||"",token=query.get("showcaseToken")||"";
-  if(!hubURL||!token)return;
-  const presets=[
-    ["presentation","fit","Presentation Fit","Use this display · high-DPI"],
-    ["landscape","wall-landscape","Wall Display Preview","1920 × 1080 CSS"],
-    ["landscape","laptop","Laptop Preview","1366 × 768 CSS"],
-    ["landscape","wide-tablet","16:10 Preview","1280 × 800 CSS"],
-    ["portrait","portrait-wall","Portrait Wall Preview","1080 × 1920 CSS"],
-    ["portrait","portrait-tablet","Portrait Tablet Preview","800 × 1280 CSS"],
-    ["portrait","portrait-four-three","4:3 Portrait Preview","768 × 1024 CSS"],
-  ];
-  const root=document.createElement("aside");root.id="showcase-view";
-  root.innerHTML="<button class='showcase-view-toggle' aria-expanded='false'>Presentation <span>▾</span></button><section class='showcase-view-panel' hidden><div class='showcase-view-head'><strong>Presentation &amp; Preview</strong><button data-clean>Clean View</button></div><p class='showcase-view-copy'>Presentation Fit uses your Windows display and DPI. Device previews emulate exact CSS viewports.</p><div data-groups></div><p class='showcase-view-status'>Presentation Fit · Native high-DPI presentation</p></section>";
-  document.body.appendChild(root);
-  const panel=root.querySelector(".showcase-view-panel"),toggle=root.querySelector(".showcase-view-toggle"),groups=root.querySelector("[data-groups]"),status=root.querySelector(".showcase-view-status");
-  const restore=document.createElement("button");restore.id="showcase-view-restore";restore.textContent="View ▸";restore.hidden=true;document.body.appendChild(restore);
-  function group(name){const box=document.createElement("section");box.className="showcase-view-group";box.innerHTML="<p>"+name+"</p><div class='showcase-view-grid'></div>";groups.appendChild(box);return box.querySelector(".showcase-view-grid");}
-  const presentation=group("Presentation"),landscape=group("Device previews"),portrait=group("Portrait previews");
-  async function pick(id,label){
-    status.textContent="Switching to "+label+"…";
-    const response=await fetch(hubURL+"/api/viewport?token="+encodeURIComponent(token),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({preset:id})});
-    const result=await response.json().catch(()=>({}));
-    if(!response.ok)throw new Error(result.error||"Presentation could not change.");
-    status.textContent=result.fit?"Presentation Fit · "+result.presentation:result.width+" × "+result.height+" · "+result.orientation+" · "+result.presentation;
-    panel.hidden=true;toggle.setAttribute("aria-expanded","false");
-  }
-  presets.forEach(([groupName,id,label,size])=>{const button=document.createElement("button");button.type="button";button.innerHTML="<b>"+label+"</b><small>"+size+"</small>";button.onclick=()=>pick(id,label).catch(error=>{status.textContent=error.message;});({presentation,landscape,portrait}[groupName]).appendChild(button);});
-  toggle.onclick=()=>{const open=panel.hidden;panel.hidden=!open;toggle.setAttribute("aria-expanded",String(open));};
-  root.querySelector("[data-clean]").onclick=()=>{root.hidden=true;restore.hidden=false;document.documentElement.classList.add("showcase-clean-view");};
-  restore.onclick=()=>{root.hidden=false;restore.hidden=true;document.documentElement.classList.remove("showcase-clean-view");};
-})();''')
+    # Legacy and native Studio staging share one presentation controller. Keeping
+    # the asset source-owned prevents the legacy bridge from drifting behind the
+    # host viewport response contract.
+    view_asset = Path(__file__).resolve().parent / "native_extension_assets/showcase-view.js"
+    if not view_asset.is_file():
+        raise PatchError(f"missing shared Showcase View asset: {view_asset}")
+    write(view, view_asset.read_text(encoding="utf-8"))
 
     write(css, r'''html.showcase-clean-view #showcase-tour{display:none}#showcase-tour{position:fixed;right:28px;bottom:28px;z-index:2147483000;width:min(600px,calc(100vw - 56px));padding:30px 32px;border:1px solid #78c3f1;border-radius:22px;background:#102333;color:#f7fbff;box-shadow:0 24px 68px #000b;font:19px/1.62 system-ui,-apple-system,"Segoe UI",sans-serif}#showcase-tour h2{margin:.55rem 0 .75rem;font-size:1.72rem;line-height:1.22;letter-spacing:-.015em}#showcase-tour p{margin:.45rem 0 1.35rem;color:#e8f3fb}.showcase-kicker{margin:0;color:#a9dcff;font-size:.78rem;font-weight:850;letter-spacing:.16em}.showcase-actions{display:flex;gap:11px;flex-wrap:wrap}.showcase-actions button,.showcase-dismiss,#showcase-view button,#showcase-view-restore{border:0;border-radius:12px;padding:12px 16px;background:#eef8ff;color:#0d2638;font:inherit;font-weight:780;cursor:pointer;min-height:50px}.showcase-actions button[data-next]{background:#5cbcf7;color:#062035;font-weight:850}.showcase-actions button[data-restart],.showcase-actions button[data-skip]{background:#1e3a51;color:#dceefb}.showcase-actions button:focus-visible,.showcase-dismiss:focus-visible,#showcase-view button:focus-visible{outline:3px solid #a9dcff;outline-offset:3px}.showcase-actions button:disabled{opacity:.5;cursor:default}.showcase-dismiss{position:absolute;right:13px;top:13px;min-height:0;padding:3px 10px;font-size:1.55rem;line-height:1}.showcase-lock-card{width:min(620px,calc(100vw - 42px));padding:32px;border-radius:22px;background:#102333;color:#f7fbff;box-shadow:0 24px 68px #000b;font:19px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}#showcase-location-lock{position:fixed;inset:0;z-index:2147483001;display:grid;place-items:center;padding:22px;background:#000a}#showcase-location-lock h2{margin:.45rem 0;font-size:1.7rem}#showcase-view{position:fixed;left:18px;top:18px;z-index:2147482999;font:16px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}.showcase-view-toggle{background:#102333!important;color:#f7fbff!important;box-shadow:0 10px 30px #0009}.showcase-view-panel{margin-top:8px;width:min(450px,calc(100vw - 36px));padding:20px;border:1px solid #78c3f1;border-radius:18px;background:#102333;color:#f7fbff;box-shadow:0 22px 62px #000b}.showcase-view-head{display:flex;align-items:center;justify-content:space-between;gap:14px}.showcase-view-head button{min-height:40px;padding:8px 12px}.showcase-view-copy{margin:13px 0 0;color:#d4e5f3;font-size:.92rem}.showcase-view-group>p{margin:18px 0 8px;color:#a9dcff;font-size:.76rem;font-weight:850;letter-spacing:.11em;text-transform:uppercase}.showcase-view-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.showcase-view-grid button{min-height:66px;text-align:left}.showcase-view-grid b,.showcase-view-grid small{display:block}.showcase-view-grid small{opacity:.76;margin-top:3px;font-size:.82rem}.showcase-view-status{margin:16px 0 0;color:#d4e5f3;font-size:.9rem;line-height:1.45}#showcase-view-restore{position:fixed;left:0;top:18px;z-index:2147482999;border-radius:0 12px 12px 0;background:#102333;color:#f7fbff;box-shadow:0 10px 30px #0009}@media(min-width:2200px){#showcase-tour{width:min(650px,calc(100vw - 72px));padding:36px;font-size:21px}#showcase-tour h2{font-size:1.95rem}.showcase-actions button{min-height:56px;padding:14px 18px}#showcase-view{font-size:17px}.showcase-view-panel{width:min(490px,calc(100vw - 40px));padding:23px}.showcase-view-grid button{min-height:72px}}@media(max-width:720px),(max-aspect-ratio:3/4){#showcase-tour{left:10px;right:10px;bottom:10px;width:auto;max-height:56vh;overflow:auto;padding:18px 19px;font-size:16px}#showcase-tour h2{font-size:1.42rem}.showcase-actions button{min-height:44px;padding:9px 11px}#showcase-view{left:8px;top:8px;font-size:14px}.showcase-view-panel{width:min(340px,calc(100vw - 16px));padding:15px}.showcase-view-grid{grid-template-columns:1fr}.showcase-view-grid button{min-height:52px}}
 ''')

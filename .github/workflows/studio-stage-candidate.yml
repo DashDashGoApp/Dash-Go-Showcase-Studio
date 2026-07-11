@@ -90,6 +90,7 @@ jobs:
           python3 tools/validate_studio_runtime_contract_matrix.py --root .
           python3 tools/test_showcase_runtime_contract.py
           python3 tools/test_generate_dashgo_assets.py --go "$(go env GOROOT)/bin/go"
+          python3 tools/test_install_showcase_native_extensions.py --gofmt "$(go env GOROOT)/bin/gofmt"
           python3 tools/test_stage_package_native_contract.py
           python3 tools/validate_studio_native_contract_beta.py --root .
           python3 tools/test_prepare_dashgo_release_beta.py

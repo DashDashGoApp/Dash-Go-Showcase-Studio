@@ -61,6 +61,8 @@ def main() -> int:
         "releasePackageVersion",
         "Dash-Go_Showcase_Studio_",
         "Linux_amd64.deb",
+        "install_showcase_native_extensions.py",
+        "Install Studio-owned native presentation, safety, and session-calendar extensions",
     )
     require_text(
         intake,

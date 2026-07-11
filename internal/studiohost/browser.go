@@ -40,10 +40,22 @@ type viewportResult struct {
 	Label        string `json:"label"`
 	Width        int    `json:"width"`
 	Height       int    `json:"height"`
+	HostWidth    int    `json:"hostWidth"`
+	HostHeight   int    `json:"hostHeight"`
+	ScalePercent int    `json:"scalePercent"`
 	Orientation  string `json:"orientation"`
 	Fit          bool   `json:"fit"`
 	Preview      bool   `json:"preview"`
 	Presentation string `json:"presentation"`
+}
+
+type displayWorkArea struct {
+	Left        int
+	Top         int
+	Width       int
+	Height      int
+	FrameWidth  int
+	FrameHeight int
 }
 
 type browserSession struct {
@@ -66,36 +78,46 @@ var showcaseViewports = []viewportSpec{
 	{ID: "portrait-four-three", Label: "4:3 Portrait", Width: 768, Height: 1024, Orientation: "portrait", Preview: true},
 }
 
-// startupShowcaseViewports includes only a compact fallback. Normal Studio
-// startup is a native presentation window, not a fixed device preview.
-var startupShowcaseViewports = []viewportSpec{
-	{ID: "startup-compact", Label: "Compact Startup", Width: 1024, Height: 600, Orientation: "landscape"},
-}
-
 const (
-	presentationHighResolutionMinimumWidth  = 2200
-	presentationHighResolutionMinimumHeight = 1200
-	presentationWorkAreaPercent             = 92
+	startupPreferredWidth  = 1600
+	startupPreferredHeight = 900
+	startupMinimumWidth    = 1024
+	startupMinimumHeight   = 600
+	startupMarginPixels    = 48
 )
 
-// selectStartupViewport chooses a high-DPI native presentation size. On a
-// standard 1080p display Studio uses essentially the available content area;
-// on 1440p/4K displays it uses a deliberate 92% margin instead of freezing at
-// 1920x1080. Device emulation remains an explicit Showcase View command.
+// selectStartupViewport chooses a bounded native presentation window instead
+// of opening nearly maximized. The preferred 1600x900 contents size is large
+// enough to demonstrate Dash-Go at normal desktop scale, while the fit keeps a
+// visible margin on smaller work areas. Device emulation remains an explicit
+// Showcase View command.
 func selectStartupViewport(workWidth, workHeight, frameWidth, frameHeight int) (viewportSpec, bool) {
 	if workWidth < 1 || workHeight < 1 || frameWidth < 0 || frameHeight < 0 {
 		return viewportSpec{}, false
 	}
 	availableWidth := workWidth - frameWidth
 	availableHeight := workHeight - frameHeight
-	compact := startupShowcaseViewports[0]
-	if availableWidth < compact.Width || availableHeight < compact.Height {
+	if availableWidth < startupMinimumWidth || availableHeight < startupMinimumHeight {
 		return viewportSpec{}, false
 	}
-	width, height := availableWidth, availableHeight
-	if availableWidth >= presentationHighResolutionMinimumWidth && availableHeight >= presentationHighResolutionMinimumHeight {
-		width = availableWidth * presentationWorkAreaPercent / 100
-		height = availableHeight * presentationWorkAreaPercent / 100
+	safeWidth := availableWidth - 2*startupMarginPixels
+	safeHeight := availableHeight - 2*startupMarginPixels
+	if safeWidth < startupMinimumWidth {
+		safeWidth = availableWidth
+	}
+	if safeHeight < startupMinimumHeight {
+		safeHeight = availableHeight
+	}
+	width, height, _, ok := fitPreviewContents(
+		safeWidth,
+		safeHeight,
+		0,
+		0,
+		startupPreferredWidth,
+		startupPreferredHeight,
+	)
+	if !ok || width < startupMinimumWidth || height < startupMinimumHeight {
+		return viewportSpec{}, false
 	}
 	return viewportSpec{
 		ID:          "startup-presentation-fit",
@@ -213,7 +235,7 @@ func (a *App) launchBrowser(pageURL string) error {
 	if !a.options.Kiosk {
 		// Every live Showcase View starts from a bounded host window. A device
 		// preset later applies its exact virtual CSS viewport within that area.
-		args = append(args, "--window-size=1024,600")
+		args = append(args, "--window-size=1100,680")
 	}
 	if a.options.Kiosk {
 		args = append(args, "--kiosk")
@@ -271,13 +293,21 @@ func (a *App) adaptiveStartupViewport() (viewportSpec, bool, error) {
 		return viewportSpec{}, false, fmt.Errorf("the private Studio browser is not ready for adaptive startup sizing")
 	}
 
-	workWidth, workHeight, frameWidth, frameHeight, err := cdpDisplayWorkArea(session.debugPort)
-	if err != nil {
-		return viewportSpec{}, false, err
+	deadline := time.Now().Add(8 * time.Second)
+	var last error
+	for time.Now().Before(deadline) {
+		area, err := cdpDisplayWorkArea(session.debugPort)
+		if err == nil {
+			view, ok := selectStartupViewport(area.Width, area.Height, area.FrameWidth, area.FrameHeight)
+			return view, ok, nil
+		}
+		last = err
+		time.Sleep(160 * time.Millisecond)
 	}
-
-	view, ok := selectStartupViewport(workWidth, workHeight, frameWidth, frameHeight)
-	return view, ok, nil
+	if last == nil {
+		last = fmt.Errorf("Chromium DevTools endpoint did not become ready")
+	}
+	return viewportSpec{}, false, fmt.Errorf("measure adaptive Studio startup viewport: %w", last)
 }
 
 func (a *App) applyViewportPreset(id string) (viewportResult, error) {
@@ -327,20 +357,19 @@ func fitPreviewContents(workWidth, workHeight, frameWidth, frameHeight, cssWidth
 	if availableWidth < 1 || availableHeight < 1 {
 		return 0, 0, 0, false
 	}
-	nativeWidth := cssWidth
-	nativeHeight := cssHeight
-	if nativeWidth > availableWidth {
-		nativeWidth = availableWidth
+	scale := 1.0
+	if widthScale := float64(availableWidth) / float64(cssWidth); widthScale < scale {
+		scale = widthScale
 	}
-	if nativeHeight > availableHeight {
-		nativeHeight = availableHeight
-	}
-	scale := float64(nativeWidth) / float64(cssWidth)
-	heightScale := float64(nativeHeight) / float64(cssHeight)
-	if heightScale < scale {
+	if heightScale := float64(availableHeight) / float64(cssHeight); heightScale < scale {
 		scale = heightScale
 	}
 	if scale <= 0 {
+		return 0, 0, 0, false
+	}
+	nativeWidth := int(float64(cssWidth)*scale + 0.5)
+	nativeHeight := int(float64(cssHeight)*scale + 0.5)
+	if nativeWidth < 1 || nativeHeight < 1 || nativeWidth > availableWidth || nativeHeight > availableHeight {
 		return 0, 0, 0, false
 	}
 	return nativeWidth, nativeHeight, scale, true
@@ -365,6 +394,7 @@ func applyChromiumViewportOnce(port int, view viewportSpec, result *viewportResu
 			return fmt.Errorf("maximize Studio browser window: %w", err)
 		}
 		result.Presentation = "Use this display · high-DPI"
+		result.ScalePercent = 100
 		return nil
 	}
 
@@ -380,11 +410,11 @@ func applyChromiumViewportOnce(port int, view viewportSpec, result *viewportResu
 		return err
 	}
 
-	workWidth, workHeight, frameWidth, frameHeight, err := cdpDisplayWorkArea(port)
+	area, err := cdpDisplayWorkArea(port)
 	if err != nil {
 		return fmt.Errorf("measure Studio display work area: %w", err)
 	}
-	nativeWidth, nativeHeight, scale, ok := fitPreviewContents(workWidth, workHeight, frameWidth, frameHeight, view.Width, view.Height)
+	nativeWidth, nativeHeight, scale, ok := fitPreviewContents(area.Width, area.Height, area.FrameWidth, area.FrameHeight, view.Width, view.Height)
 	if !ok {
 		return fmt.Errorf("no safe native Studio content area is available for %dx%d", view.Width, view.Height)
 	}
@@ -395,6 +425,12 @@ func applyChromiumViewportOnce(port int, view viewportSpec, result *viewportResu
 	}); err != nil {
 		return fmt.Errorf("resize Studio browser contents: %w", err)
 	}
+	if err := centerChromiumWindow(port, windowID, area); err != nil {
+		return fmt.Errorf("center Studio browser window: %w", err)
+	}
+	result.HostWidth = nativeWidth
+	result.HostHeight = nativeHeight
+	result.ScalePercent = int(scale*100 + 0.5)
 
 	if !view.Preview {
 		result.Presentation = "Use this display · high-DPI"
@@ -417,19 +453,55 @@ func applyChromiumViewportOnce(port int, view viewportSpec, result *viewportResu
 	return nil
 }
 
-func cdpDisplayWorkArea(port int) (int, int, int, int, error) {
+func centerChromiumWindow(port, windowID int, area displayWorkArea) error {
+	response, err := cdpBrowserCall(port, "Browser.getWindowBounds", map[string]any{
+		"windowId": windowID,
+	})
+	if err != nil {
+		return err
+	}
+	result, _ := response["result"].(map[string]any)
+	bounds, _ := result["bounds"].(map[string]any)
+	width, widthOK := browserBoundInt(bounds["width"])
+	height, heightOK := browserBoundInt(bounds["height"])
+	if !widthOK || !heightOK || width < 1 || height < 1 {
+		return fmt.Errorf("Chromium returned invalid window bounds")
+	}
+	left := area.Left + (area.Width-width)/2
+	top := area.Top + (area.Height-height)/2
+	_, err = cdpBrowserCall(port, "Browser.setWindowBounds", map[string]any{
+		"windowId": windowID,
+		"bounds": map[string]any{
+			"left": left,
+			"top":  top,
+		},
+	})
+	return err
+}
+
+func browserBoundInt(value any) (int, bool) {
+	number, ok := value.(float64)
+	if !ok || number != float64(int(number)) {
+		return 0, false
+	}
+	return int(number), true
+}
+
+func cdpDisplayWorkArea(port int) (displayWorkArea, error) {
 	metrics, err := cdpCall(port, "Runtime.evaluate", map[string]any{
-		"expression":    "JSON.stringify({availWidth:screen.availWidth,availHeight:screen.availHeight,innerWidth:window.innerWidth,innerHeight:window.innerHeight,outerWidth:window.outerWidth,outerHeight:window.outerHeight})",
+		"expression":    "JSON.stringify({availLeft:screen.availLeft||0,availTop:screen.availTop||0,availWidth:screen.availWidth,availHeight:screen.availHeight,innerWidth:window.innerWidth,innerHeight:window.innerHeight,outerWidth:window.outerWidth,outerHeight:window.outerHeight})",
 		"returnByValue": true,
 	})
 	if err != nil {
-		return 0, 0, 0, 0, err
+		return displayWorkArea{}, err
 	}
 
 	result, _ := metrics["result"].(map[string]any)
 	raw, _ := result["result"].(map[string]any)
 	value, _ := raw["value"].(string)
 	var data struct {
+		AvailLeft   int `json:"availLeft"`
+		AvailTop    int `json:"availTop"`
 		AvailWidth  int `json:"availWidth"`
 		AvailHeight int `json:"availHeight"`
 		InnerWidth  int `json:"innerWidth"`
@@ -438,13 +510,20 @@ func cdpDisplayWorkArea(port int) (int, int, int, int, error) {
 		OuterHeight int `json:"outerHeight"`
 	}
 	if err := json.Unmarshal([]byte(value), &data); err != nil {
-		return 0, 0, 0, 0, fmt.Errorf("decode Chromium work-area metrics: %w", err)
+		return displayWorkArea{}, fmt.Errorf("decode Chromium work-area metrics: %w", err)
 	}
 	if data.AvailWidth < 1 || data.AvailHeight < 1 || data.InnerWidth < 1 || data.InnerHeight < 1 || data.OuterWidth < data.InnerWidth || data.OuterHeight < data.InnerHeight {
-		return 0, 0, 0, 0, fmt.Errorf("Chromium returned invalid work-area metrics")
+		return displayWorkArea{}, fmt.Errorf("Chromium returned invalid work-area metrics")
 	}
 
-	return data.AvailWidth, data.AvailHeight, data.OuterWidth - data.InnerWidth, data.OuterHeight - data.InnerHeight, nil
+	return displayWorkArea{
+		Left:        data.AvailLeft,
+		Top:         data.AvailTop,
+		Width:       data.AvailWidth,
+		Height:      data.AvailHeight,
+		FrameWidth:  data.OuterWidth - data.InnerWidth,
+		FrameHeight: data.OuterHeight - data.InnerHeight,
+	}, nil
 }
 
 func cdpWindowMetrics(response map[string]any) (int, int, int, int) {

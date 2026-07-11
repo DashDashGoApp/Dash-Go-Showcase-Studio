@@ -43,6 +43,10 @@ def main() -> int:
         raise ValidationError(str(exc)) from exc
 
     native = matrix["nativeContract"]
+    assumption_ids = {row["id"] for row in matrix["assumptions"]}
+    for required in ("native.presentation-extension", "native.session-calendar-extension"):
+        if required not in assumption_ids:
+            raise ValidationError(f"runtime contract matrix is missing Studio-owned native extension assumption {required!r}")
     if native_contract_name(matrix) != "dashgo-showcase/v1":
         raise ValidationError("runtime contract matrix has an unexpected native contract name")
     if native_contract_declaration_path(matrix) != "release/showcase-contract.json":
@@ -117,12 +121,14 @@ def main() -> int:
         "tools/validate_studio_runtime_contract_matrix.py --root .",
         "tools/test_showcase_runtime_contract.py",
         "tools/test_stage_package_native_contract.py",
+        'python3 tools/test_install_showcase_native_extensions.py --gofmt "$(go env GOROOT)/bin/gofmt"',
     )
     require_text(
         stage_workflow,
         "tools/validate_studio_runtime_contract_matrix.py --root .",
         "tools/test_showcase_runtime_contract.py",
         "tools/test_stage_package_native_contract.py",
+        'python3 tools/test_install_showcase_native_extensions.py --gofmt "$(go env GOROOT)/bin/gofmt"',
     )
     require_text(
         beta_validator,
@@ -132,6 +138,7 @@ def main() -> int:
     require_text(
         prepublish_workflow,
         "tools/test_stage_package_native_contract.py",
+        'python3 tools/test_install_showcase_native_extensions.py --gofmt "$(go env GOROOT)/bin/gofmt"',
     )
     require_text(
         stage_native_test,

@@ -38,6 +38,7 @@ def main() -> int:
         "tools/validate_studio_prepublication_bridge.py --root .",
         "python3 tools/test_prepare_dashgo_release_prepublication.py",
         "python3 tools/test_stage_package_native_contract.py",
+        'python3 tools/test_install_showcase_native_extensions.py --gofmt "$(go env GOROOT)/bin/gofmt"',
     )
     require_text(
         stage,

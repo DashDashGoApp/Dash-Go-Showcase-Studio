@@ -109,12 +109,12 @@
       {
         "source": "calendars/chore-wheel.ics",
         "mode": "fixture-only",
-        "expectedEventMarker": "SUMMARY:Kitchen reset —"
+        "expectedEventMarker": "SUMMARY:Kitchen reset \u2014"
       },
       {
         "source": "calendars/routines.ics",
         "mode": "fixture-only",
-        "expectedEventMarker": "SUMMARY:Morning ready — Avery"
+        "expectedEventMarker": "SUMMARY:Morning ready \u2014 Avery"
       },
       {
         "source": "calendars/maintenance.ics",
@@ -243,6 +243,20 @@
       "detail": "Studio owns fictional content and marker assertions; Dash-Go supplies constrained static scenario-asset serving."
     },
     {
+      "id": "native.presentation-extension",
+      "classification": "studio-owned",
+      "category": "path",
+      "value": "Tour, Showcase View, Studio CSS, offline fixtures, and host/network safety policy",
+      "detail": "Contract v1 supplies isolated scenario/runtime capabilities; Stage must still install and validate the Studio-owned presentation and safety extension before Dash-Go generates browser bundles."
+    },
+    {
+      "id": "native.session-calendar-extension",
+      "classification": "studio-owned",
+      "category": "calendars",
+      "value": "session-only edit, move, delete-series UI and mutation responses over the native writable allowlist",
+      "detail": "Studio consumes Contract v1 calendar declarations but owns the temporary mutation presentation. Native candidates must return sync: session and must not queue provider synchronization."
+    },
+    {
       "id": "native.liveness",
       "classification": "studio-owned",
       "category": "readiness",
@@ -294,13 +308,13 @@
     "browserRoutes": [
       {
         "path": "/calendars/chore-wheel.ics",
-        "contains": "SUMMARY:Kitchen reset —",
+        "contains": "SUMMARY:Kitchen reset \u2014",
         "parseJSON": false,
         "classification": "studio-owned"
       },
       {
         "path": "/calendars/routines.ics",
-        "contains": "SUMMARY:Morning ready — Avery",
+        "contains": "SUMMARY:Morning ready \u2014 Avery",
         "parseJSON": false,
         "classification": "studio-owned"
       },

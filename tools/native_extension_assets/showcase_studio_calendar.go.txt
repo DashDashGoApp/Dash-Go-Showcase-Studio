@@ -1,0 +1,243 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/DashDashGoApp/Dash-Go/app/internal/calendar/icalwrite"
+	writebackpkg "github.com/DashDashGoApp/Dash-Go/app/internal/calendar/writeback"
+	"github.com/DashDashGoApp/Dash-Go/app/internal/fileio"
+	"github.com/DashDashGoApp/Dash-Go/app/internal/jsonutil"
+)
+
+const showcaseSessionCalendarMessage = "Saved in this Studio session. Changes reset when Studio closes."
+
+func showcaseCalendarUIDValid(uid string) bool {
+	uid = strings.TrimSpace(uid)
+	if uid == "" || len(uid) > 180 {
+		return false
+	}
+	for _, r := range uid {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || strings.ContainsRune("-_.@", r) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// showcaseFindCalendarItem reads only direct regular vdir object files. The
+// UID check is strict, preventing a crafted request from moving/deleting an
+// aggregate or another collection's event.
+func showcaseFindCalendarItem(collection, uid string) (string, []byte, error) {
+	entries, err := os.ReadDir(collection)
+	if err != nil {
+		return "", nil, err
+	}
+	var foundPath string
+	var foundBody []byte
+	for _, entry := range entries {
+		if entry.IsDir() || strings.ToLower(filepath.Ext(entry.Name())) != ".ics" {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return "", nil, err
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		if info.Size() > 1024*1024 {
+			return "", nil, fmt.Errorf("calendar item %q is unexpectedly large", entry.Name())
+		}
+		path := filepath.Join(collection, entry.Name())
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return "", nil, err
+		}
+		if !icalwrite.HasUID(string(body), uid) {
+			continue
+		}
+		if foundPath != "" {
+			return "", nil, errors.New("calendar contains more than one item for this event")
+		}
+		foundPath, foundBody = path, body
+	}
+	if foundPath == "" {
+		return "", nil, os.ErrNotExist
+	}
+	return foundPath, foundBody, nil
+}
+
+func (a *app) showcaseCalendarMutationResponse(service *writebackpkg.Service, sources []string, uid, action, label string, mutate func() error) (map[string]any, error) {
+	warning := ""
+	err := service.WithSyncLock(func() error {
+		if err := mutate(); err != nil {
+			return err
+		}
+		for _, source := range sources {
+			calendar, err := service.Resolve(source)
+			if err != nil {
+				return err
+			}
+			if err := service.MergeCollection(source, calendar.Collection); err != nil {
+				warning = "Saved in this Studio session, but the calendar display will refresh after the next dashboard refresh. Changes still reset when Studio closes."
+				return nil
+			}
+		}
+		if _, err := a.refreshEventCache(true, 90, 365); err != nil {
+			warning = "Saved in this Studio session, but the dashboard display will refresh after the next dashboard refresh. Changes still reset when Studio closes."
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, writebackpkg.ErrBusy) {
+			return nil, errors.New("calendar sync is already running; try again shortly")
+		}
+		return nil, err
+	}
+	message := showcaseSessionCalendarMessage
+	severity := "success"
+	if warning != "" {
+		message, severity = warning, "warning"
+	}
+	for _, source := range sources {
+		service.Record(source, "saved", message)
+	}
+	a.recordAction("calendars", label, severity, message, map[string]any{"source": sources[0], "uid": uid, "showcase": true})
+	response := map[string]any{"ok": true, "source": sources[len(sources)-1], "uid": uid, "action": action, "sync": "session"}
+	if warning != "" {
+		response["warning"] = warning
+	}
+	return response, nil
+}
+
+func (a *app) showcaseCalendarMove(body map[string]any) (map[string]any, error) {
+	if !a.showcaseMode() {
+		return nil, errors.New("moving calendar events is available only in Showcase Studio")
+	}
+	source := strings.TrimSpace(jsonutil.BodyString(body, "calUrl"))
+	target := strings.TrimSpace(jsonutil.BodyString(body, "targetCalUrl"))
+	uid := strings.TrimSpace(jsonutil.BodyString(body, "uid"))
+	if !a.showcaseWritableCalendarSource(source) || !a.showcaseWritableCalendarSource(target) || source == target {
+		return nil, errors.New("choose two different Studio session calendars")
+	}
+	if !showcaseCalendarUIDValid(uid) {
+		return nil, errors.New("calendar event required")
+	}
+	service := a.calendarWritebackService()
+	return a.showcaseCalendarMutationResponse(service, []string{source, target}, uid, "moved", "Move Studio calendar event", func() error {
+		if err := a.calendarWritebackSourceBlocked(source); err != nil {
+			return err
+		}
+		if err := a.calendarWritebackSourceBlocked(target); err != nil {
+			return err
+		}
+		sourceCalendar, err := service.Resolve(source)
+		if err != nil {
+			return err
+		}
+		targetCalendar, err := service.Resolve(target)
+		if err != nil {
+			return err
+		}
+		sourcePath, item, err := showcaseFindCalendarItem(sourceCalendar.Collection, uid)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return errors.New("calendar event is no longer available to move")
+			}
+			return err
+		}
+		text := string(item)
+		if icalwrite.IsRecurring(text) || icalwrite.HasRecurrenceID(text) || icalwrite.HasSchedulingProperties(text) {
+			return errors.New("Studio can move one-time events only; manage a recurring series instead")
+		}
+		if _, _, err := showcaseFindCalendarItem(targetCalendar.Collection, uid); err == nil {
+			return errors.New("the destination calendar already has this event")
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		destinationPath := filepath.Join(targetCalendar.Collection, uid+".ics")
+		if err := fileio.WriteAtomic(destinationPath, item, 0600); err != nil {
+			return fmt.Errorf("copy event to destination calendar: %w", err)
+		}
+		if err := fileio.RemoveDurable(sourcePath); err != nil {
+			_ = fileio.RemoveDurable(destinationPath)
+			return fmt.Errorf("remove source calendar event: %w", err)
+		}
+		return nil
+	})
+}
+
+func (a *app) showcaseCalendarDeleteSeries(body map[string]any) (map[string]any, error) {
+	if !a.showcaseMode() {
+		return nil, errors.New("deleting a calendar series is available only in Showcase Studio")
+	}
+	source := strings.TrimSpace(jsonutil.BodyString(body, "calUrl"))
+	uid := strings.TrimSpace(jsonutil.BodyString(body, "uid"))
+	if !a.showcaseWritableCalendarSource(source) || !showcaseCalendarUIDValid(uid) {
+		return nil, errors.New("calendar event required")
+	}
+	service := a.calendarWritebackService()
+	return a.showcaseCalendarMutationResponse(service, []string{source}, uid, "series-deleted", "Delete Studio calendar series", func() error {
+		if err := a.calendarWritebackSourceBlocked(source); err != nil {
+			return err
+		}
+		calendar, err := service.Resolve(source)
+		if err != nil {
+			return err
+		}
+		path, item, err := showcaseFindCalendarItem(calendar.Collection, uid)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return errors.New("calendar series is no longer available")
+			}
+			return err
+		}
+		if !icalwrite.IsRecurring(string(item)) {
+			return errors.New("this event is not a repeating series")
+		}
+		if err := fileio.RemoveDurable(path); err != nil {
+			return fmt.Errorf("delete calendar series: %w", err)
+		}
+		return nil
+	})
+}
+
+func (a *app) showcaseCalendarManagementStatus(status, writeback map[string]any) map[string]any {
+	status["showcaseSession"] = map[string]any{
+		"enabled": true,
+		"label":   "Studio Session Calendars",
+		"detail":  "Edits are private to this Studio session and reset when Studio closes.",
+	}
+	registered := map[string]bool{}
+	for _, raw := range jsonutil.List(writeback["calendars"]) {
+		row := jsonutil.Map(raw)
+		source := strings.TrimSpace(jsonutil.StringValue(row["source"]))
+		if a.showcaseWritableCalendarSource(source) {
+			registered[source] = true
+		}
+	}
+	for _, raw := range jsonutil.List(status["calendars"]) {
+		row := jsonutil.Map(raw)
+		source := strings.TrimSpace(jsonutil.StringValue(row["url"]))
+		if a.showcaseWritableCalendarSource(source) {
+			row["kind"] = "writeback"
+			row["deleteMode"] = "hide-only"
+			row["sourceLabel"] = "Studio session calendar · writable · resets when Studio closes"
+			row["writebackRegistered"] = registered[source]
+			row["privateSelected"] = false
+			row["showcaseSession"] = true
+			continue
+		}
+		row["showcaseSession"] = false
+		row["showcaseReadOnly"] = true
+		if source != "" {
+			row["sourceLabel"] = "Studio demonstration feed · read-only"
+		}
+	}
+	return status
+}

@@ -1,0 +1,80 @@
+package main
+
+import "testing"
+
+func TestShowcaseStudioPolicyLocksHostAndNetworkActions(t *testing.T) {
+	a := &app{showcase: &showcaseRuntime{}}
+	for _, path := range []string{
+		"/api/location",
+		"/api/weather/refresh",
+		"/api/display/off",
+		"/api/backup",
+		"/api/lock/change",
+		"/api/todo/microsoft/connect",
+	} {
+		if reason := a.showcaseStudioRestrictedPost(path, map[string]any{}); reason == "" {
+			t.Fatalf("Showcase policy did not restrict %s", path)
+		}
+	}
+	if reason := a.showcaseStudioRestrictedPost("/api/settings", map[string]any{"weatherApiKey": "not-real"}); reason == "" {
+		t.Fatal("Showcase policy allowed a network-owned setting")
+	}
+	if reason := a.showcaseStudioRestrictedPost("/api/settings", map[string]any{"theme": "basic"}); reason != "" {
+		t.Fatalf("Showcase policy blocked an ordinary local setting: %s", reason)
+	}
+}
+
+func TestShowcaseStudioGeocodeIsOfflineAndDeterministic(t *testing.T) {
+	a := &app{showcase: &showcaseRuntime{}}
+	payload := a.showcaseStudioGeocode("Chicago")
+	rows, ok := payload["results"].([]map[string]any)
+	if !ok || len(rows) != 1 {
+		t.Fatalf("Chicago results = %#v", payload["results"])
+	}
+	if rows[0]["city"] != "Chicago" || payload["studioPreview"] != true {
+		t.Fatalf("Chicago fixture = %#v", payload)
+	}
+}
+
+func TestShowcaseStudioWeatherAndMapsStayOffline(t *testing.T) {
+	a := &app{showcase: &showcaseRuntime{}}
+	weather := a.showcaseStudioWeatherPayload()
+	if weather["source"] != "showcase-fixture" || weather["generator"] != "showcase" {
+		t.Fatalf("Studio weather fixture = %#v", weather)
+	}
+	lookup := a.showcaseStudioEventMapLookup("Whole Foods Market, Chicago")
+	if lookup["ok"] != true || lookup["geocoder"] != "showcase-venue-catalog" {
+		t.Fatalf("Studio event-map fixture = %#v", lookup)
+	}
+	if unknown := a.showcaseStudioEventMapLookup("Unknown private address"); unknown["ok"] == true {
+		t.Fatalf("unknown location unexpectedly resolved: %#v", unknown)
+	}
+}
+
+func TestShowcaseStudioCalendarAllowlistUsesNativeManifest(t *testing.T) {
+	a := &app{showcase: &showcaseRuntime{calendars: map[string]showcaseCalendar{
+		"calendars/family.green.ics":   {Writable: true, Enabled: true},
+		"calendars/archive.gray.ics":   {Writable: true, Enabled: false},
+		"calendars/read-only.blue.ics": {Writable: false, Enabled: true},
+	}}}
+	if !a.showcaseWritableCalendarSource("calendars/family.green.ics") {
+		t.Fatal("enabled writable Studio calendar was not accepted")
+	}
+	for _, source := range []string{"calendars/archive.gray.ics", "calendars/read-only.blue.ics", "calendars/missing.ics"} {
+		if a.showcaseWritableCalendarSource(source) {
+			t.Fatalf("non-writable Studio calendar was accepted: %s", source)
+		}
+	}
+}
+
+func TestShowcaseStudioUpdateStatusIsUnavailable(t *testing.T) {
+	a := &app{showcase: &showcaseRuntime{}, releaseVersion: "1.5.9"}
+	status := a.showcaseStudioSystemUpdateStatus()
+	if status["state"] != "unavailable" || status["running"] != false {
+		t.Fatalf("system update status = %#v", status)
+	}
+	availability := a.showcaseStudioUpdateAvailability()
+	if availability["available"] != false || availability["installedVersion"] != "1.5.9" {
+		t.Fatalf("release availability = %#v", availability)
+	}
+}

@@ -47,6 +47,23 @@ Studio always seeds `showcase-manifest.json` with its four disposable editable c
 
 Older packaged Dash-Go releases without that declaration continue through the checked-in legacy bridge. Studio does not guess: a malformed or incomplete native declaration fails closed, while an absent declaration is the explicit legacy-compatibility fallback until the contract-native stage path replaces the overlays.
 
+## Native Studio extension boundary
+
+A valid Contract v1 runtime bypasses the legacy runtime/data adapters, but it
+does not bypass Studio-owned presentation and safety behavior. Stage installs a
+small checked extension containing the Tour, Showcase View, Studio CSS, offline
+fixture behavior, location lock, server-side host/network restrictions, and the
+session-calendar presentation/mutation layer, then uses Dash-Go's own
+`runtime_assets.go` to generate and verify the final bundles.
+
+This extension is intentionally distinct from the legacy overlay. It does not
+provide or replace native data-root isolation, scenario manifests, calendar
+writeback allowlists, cache rebuilding, status readiness, or static scenario
+assets. It consumes the native allowlist to expose only disposable writable
+calendars, returns session-only mutation status, and never schedules remote sync.
+A native package is rejected when the extension, its manifest ordering, calendar
+boundaries, or guardrails are missing.
+
 ## Runtime contract matrix (Task 3.1)
 
 `internal/studiohost/dashgo_runtime_contract_matrix.json` makes the remaining

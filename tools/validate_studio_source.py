@@ -91,6 +91,8 @@ def assert_stage_packager_syntax_and_r7_phase(root: Path) -> None:
         "showcaseRuntimeMode",
         '"--go"',
         "asset_generator",
+        "install_showcase_native_extensions.py",
+        "Install Studio-owned native presentation, safety, and session-calendar extensions",
     ):
         if token not in text:
             raise CheckError(f"ci/stage-package.py Showcase runtime selection is missing: {token}")
@@ -141,6 +143,13 @@ def main() -> int:
         "tools/validate_studio_legacy_bridge_candidate.py", "tools/validate_studio_native_contract_beta.py", "tools/test_prepare_dashgo_release_beta.py",
         "tools/validate_studio_prepublication_bridge.py", "tools/test_prepare_dashgo_release_prepublication.py",
         "tools/test_stage_package_native_contract.py", "tools/test_generate_dashgo_assets.py",
+        "tools/install_showcase_native_extensions.py", "tools/test_install_showcase_native_extensions.py",
+        "tools/native_extension_assets/showcase-tour.js", "tools/native_extension_assets/showcase-view.js",
+        "tools/native_extension_assets/showcase-calendar-sandbox.js",
+        "tools/native_extension_assets/showcase-studio.css",
+        "tools/native_extension_assets/showcase_studio_extension.go.txt",
+        "tools/native_extension_assets/showcase_studio_calendar.go.txt",
+        "tools/native_extension_assets/showcase_studio_extension_test.go.txt",
         ".github/workflows/studio-prepublish-candidate.yml",
         ".github/workflows/studio-legacy-bridge-candidate.yml", "PREPUBLICATION_CANDIDATE_INTAKE.md",
         "packaging/windows/DashGoShowcaseStudio.iss", "WHAT-STUDIO-DOES-LOCALLY.txt",
@@ -213,6 +222,8 @@ def main() -> int:
         workflow_text = (root / workflow).read_text(encoding="utf-8")
         if 'python3 tools/test_generate_dashgo_assets.py --go "$(go env GOROOT)/bin/go"' not in workflow_text:
             raise CheckError(f"{workflow} does not run the generated-asset bridge regression")
+        if 'python3 tools/test_install_showcase_native_extensions.py --gofmt "$(go env GOROOT)/bin/gofmt"' not in workflow_text:
+            raise CheckError(f"{workflow} does not run the native Studio-extension regression")
     generated_asset_contract = (root / "SHOWCASE_STUDIO_2.0_CONTRACT.md").read_text(encoding="utf-8")
     for token in (
         "Source-owned browser asset generation",
@@ -302,9 +313,12 @@ def main() -> int:
         "portrait-wall",
         "portrait-tablet",
         "portrait-four-three",
-        "startupShowcaseViewports",
+        "startupPreferredWidth",
+        "startupPreferredHeight",
         "selectStartupViewport",
         "adaptiveStartupViewport",
+        "centerChromiumWindow",
+        "ScalePercent",
     ):
         if token not in host_browser:
             raise CheckError(f"Studio browser viewport contract is missing: {token}")
@@ -314,6 +328,65 @@ def main() -> int:
     for retired in ("compact-touch", "compact-portrait"):
         if retired in host_browser:
             raise CheckError(f"Studio browser viewport contract still exposes retired live preset: {retired}")
+    native_extension_installer = (root / "tools/install_showcase_native_extensions.py").read_text(encoding="utf-8")
+    for token in (
+        "dashgo-showcase/v1",
+        "showcase-tour.js",
+        "showcase-view.js",
+        "showcase-calendar-sandbox.js",
+        "showcase-studio.css",
+        "showcase_studio_extension.go",
+        "showcase_studio_calendar.go",
+        "showcaseStudioRestrictedPost",
+        "showcaseStudioRestrictedGet",
+        "showcaseStudioGeocode",
+        "showcaseStudioWeatherPayload",
+        "showcaseStudioEventMapLookup",
+        "showcaseStudioSystemUpdateStatus",
+        "showcaseStudioUpdateAvailability",
+        "showcaseWritableCalendarSource",
+        "showcaseCalendarMove",
+        "showcaseCalendarDeleteSeries",
+        "weather_facade.go",
+        "maps_facade.go",
+        "runtime_assets_manifest_test.go",
+    ):
+        if token not in native_extension_installer:
+            raise CheckError(f"Studio native extension installer is missing: {token}")
+    native_view = (root / "tools/native_extension_assets/showcase-view.js").read_text(encoding="utf-8")
+    native_calendar = (root / "tools/native_extension_assets/showcase-calendar-sandbox.js").read_text(encoding="utf-8")
+    for token in (
+        "Device previews preserve the selected CSS aspect ratio",
+        "hostWidth",
+        "hostHeight",
+        "scalePercent",
+        "aria-pressed",
+    ):
+        if token not in native_view:
+            raise CheckError(f"Studio native viewport extension is missing: {token}")
+    for token in ("showcaseMoveCalendarEvent", "showcaseDeleteCalendarSeries", "/api/calendar/event/move", "/api/calendar/event/series/delete"):
+        if token not in native_calendar:
+            raise CheckError(f"Studio native session-calendar UI is missing: {token}")
+    native_policy = (root / "tools/native_extension_assets/showcase_studio_extension.go.txt").read_text(encoding="utf-8")
+    native_calendar_policy = (root / "tools/native_extension_assets/showcase_studio_calendar.go.txt").read_text(encoding="utf-8")
+    for token in (
+        "showcaseStudioRestrictedPost",
+        "showcaseStudioRestrictedGet",
+        "showcaseStudioGeocode",
+        "showcaseStudioWeatherPayload",
+        "showcaseStudioEventMapLookup",
+        "showcase-fixture",
+        "studio_location_locked",
+        "studio_external_integration_locked",
+        "showcaseStudioSystemUpdateStatus",
+        "showcaseStudioUpdateAvailability",
+        "showcaseWritableCalendarSource",
+    ):
+        if token not in native_policy:
+            raise CheckError(f"Studio native safety extension is missing: {token}")
+    for token in ("showcaseCalendarMove", "showcaseCalendarDeleteSeries", "showcaseSessionCalendarMessage", "sync"):
+        if token not in native_calendar_policy:
+            raise CheckError(f"Studio native session-calendar runtime is missing: {token}")
     for token in ("HideWindow: true", "CreationFlags: createNoWindow"):
         if token not in child_windows:
             raise CheckError(f"Windows child no-console contract is missing: {token}")

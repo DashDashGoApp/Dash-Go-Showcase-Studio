@@ -1,0 +1,263 @@
+package main
+
+import (
+	"errors"
+	"strings"
+	"time"
+)
+
+func showcaseStudioUnavailable(action string) error {
+	return errors.New(action + " is unavailable in Dash-Go Showcase Studio")
+}
+
+func (a *app) showcaseStudioSystemUpdateStatus() map[string]any {
+	return map[string]any{
+		"state": "unavailable", "running": false, "ready": false,
+		"label":    "Unavailable in Showcase Studio",
+		"detail":   "Studio never runs device package updates.",
+		"problems": []any{"Studio is a disposable local demonstration environment."},
+	}
+}
+
+func (a *app) showcaseStudioUpdateAvailability() map[string]any {
+	return map[string]any{
+		"ok": false, "available": false, "ready": false,
+		"label":    "Unavailable in Showcase Studio",
+		"detail":   "Studio never checks, downloads, or installs Dash-Go releases.",
+		"problems": []any{"Studio uses a pinned local runtime."},
+		"track":    "showcase", "installedVersion": a.releaseVersion,
+	}
+}
+
+func (a *app) showcaseWritableCalendarSource(source string) bool {
+	if !a.showcaseMode() || a.showcase == nil {
+		return false
+	}
+	calendar, found := a.showcase.calendars[strings.TrimSpace(source)]
+	return found && calendar.Writable && calendar.Enabled
+}
+
+// showcaseStudioWeatherPayload is deliberately offline and deterministic in shape,
+// while using today's local date so the dashboard has a useful forecast during
+// every Studio session. It never calls an external provider.
+func (a *app) showcaseStudioWeatherPayload() map[string]any {
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	highs := []int{78, 80, 76, 73, 75, 79, 82}
+	lows := []int{61, 63, 60, 57, 58, 62, 65}
+	codes := []int{2, 1, 61, 3, 2, 0, 1}
+	precipitation := []float64{0, 0, 0.18, 0.04, 0, 0, 0}
+	probability := []int{5, 5, 55, 25, 10, 5, 5}
+	winds := []int{9, 11, 14, 12, 10, 8, 10}
+	uv := []int{6, 7, 4, 5, 6, 7, 7}
+	daily := map[string]any{
+		"time":                          []any{},
+		"weather_code":                  []any{},
+		"temperature_2m_max":            []any{},
+		"temperature_2m_min":            []any{},
+		"apparent_temperature_max":      []any{},
+		"precipitation_sum":             []any{},
+		"precipitation_probability_max": []any{},
+		"wind_speed_10m_max":            []any{},
+		"uv_index_max":                  []any{},
+		"sunrise":                       []any{},
+		"sunset":                        []any{},
+	}
+	for i := range highs {
+		date := today.AddDate(0, 0, i)
+		daily["time"] = append(daily["time"].([]any), date.Format("2006-01-02"))
+		daily["weather_code"] = append(daily["weather_code"].([]any), codes[i])
+		daily["temperature_2m_max"] = append(daily["temperature_2m_max"].([]any), highs[i])
+		daily["temperature_2m_min"] = append(daily["temperature_2m_min"].([]any), lows[i])
+		daily["apparent_temperature_max"] = append(daily["apparent_temperature_max"].([]any), highs[i]-1)
+		daily["precipitation_sum"] = append(daily["precipitation_sum"].([]any), precipitation[i])
+		daily["precipitation_probability_max"] = append(daily["precipitation_probability_max"].([]any), probability[i])
+		daily["wind_speed_10m_max"] = append(daily["wind_speed_10m_max"].([]any), winds[i])
+		daily["uv_index_max"] = append(daily["uv_index_max"].([]any), uv[i])
+		daily["sunrise"] = append(daily["sunrise"].([]any), date.Add(6*time.Hour+12*time.Minute).Format(time.RFC3339))
+		daily["sunset"] = append(daily["sunset"].([]any), date.Add(19*time.Hour+48*time.Minute).Format(time.RFC3339))
+	}
+
+	hourlyTimes := []any{}
+	hourlyTemperatures := []any{}
+	hourlyCodes := []any{}
+	hourlyProbability := []any{}
+	for _, hour := range []int{6, 9, 12, 15, 18, 21} {
+		hourlyTimes = append(hourlyTimes, today.Add(time.Duration(hour)*time.Hour).Format(time.RFC3339))
+		hourlyTemperatures = append(hourlyTemperatures, 64+(hour-6)/3*4)
+		hourlyCodes = append(hourlyCodes, 2)
+		hourlyProbability = append(hourlyProbability, 5)
+	}
+	hourly := map[string]any{
+		"time":                      hourlyTimes,
+		"temperature_2m":            hourlyTemperatures,
+		"weather_code":              hourlyCodes,
+		"precipitation_probability": hourlyProbability,
+	}
+	current := map[string]any{
+		"temperature_2m":       72,
+		"apparent_temperature": 71,
+		"weather_code":         2,
+		"wind_speed_10m":       9,
+		"relative_humidity_2m": 54,
+	}
+	source := map[string]any{
+		"_source":      "showcase",
+		"_sourceLabel": "Studio Preview Forecast",
+		"current":      current,
+		"daily":        daily,
+		"hourly":       hourly,
+		"alerts":       []any{},
+	}
+	status := []any{map[string]any{
+		"id": "showcase", "label": "Studio Preview Forecast", "tier": "offline fixture",
+		"ok": true, "freshness": "synthetic", "generator": "showcase",
+	}}
+	return map[string]any{
+		"current": current, "daily": daily, "hourly": hourly, "alerts": []any{},
+		"selected": []any{"showcase"}, "sources": []any{source},
+		"status": status, "sourceHealth": status,
+		"cache":              map[string]any{"hit": true, "synthetic": true, "generatedAt": now.Unix()},
+		"weatherBlend":       map[string]any{"ok": true, "method": "offline Studio fixture", "sourceCount": 1, "generator": "showcase"},
+		"keysInServedConfig": false, "source": "showcase-fixture", "generator": "showcase",
+	}
+}
+
+func (a *app) showcaseStudioRestrictedPost(path string, body map[string]any) string {
+	if !a.showcaseMode() {
+		return ""
+	}
+	switch path {
+	case "/api/location":
+		return "studio_location_locked"
+	case "/api/weather/refresh":
+		return "studio_offline_weather_fixture"
+	case "/api/display/off", "/api/display/on", "/api/browser/restart", "/api/terminal/open",
+		"/api/system-update", "/api/doctor", "/api/update/track/toggle", "/api/update",
+		"/api/reboot", "/api/poweroff", "/api/moon/update", "/api/calendars/sync":
+		return "studio_system_action_locked"
+	case "/api/backup", "/api/backup/prune", "/api/backup/restore", "/api/backup/delete", "/api/diagnostics":
+		return "studio_file_import_locked"
+	case "/api/lock/set", "/api/lock/change", "/api/lock/remove", "/api/lock/config":
+		return "studio_security_locked"
+	}
+	if strings.HasPrefix(path, "/api/backup/") || strings.HasPrefix(path, "/api/calendar/import") || strings.HasPrefix(path, "/api/calendars/import") {
+		return "studio_file_import_locked"
+	}
+	if strings.HasPrefix(path, "/api/todo/microsoft") || strings.HasPrefix(path, "/api/todo/graph") || strings.HasPrefix(path, "/api/apprise") || strings.HasPrefix(path, "/api/notify") {
+		return "studio_external_integration_locked"
+	}
+	if path == "/api/settings" {
+		for _, key := range []string{"weatherProviders", "weatherApi", "weatherApiKey", "weatherAlerts", "radarProvider", "displaySleep", "displayPower", "terminalAccess"} {
+			if _, present := body[key]; present {
+				return "studio_network_or_system_setting_locked"
+			}
+		}
+	}
+	return ""
+}
+
+func (a *app) showcaseStudioRestrictedGet(path string) string {
+	if !a.showcaseMode() {
+		return ""
+	}
+	switch path {
+	case "/api/update/status", "/api/update/progress", "/api/update/availability", "/api/update/log":
+		return "studio_update_locked"
+	case "/api/logs", "/api/terminal/status", "/api/action-history", "/api/doctor/status", "/api/memory/status":
+		return "studio_diagnostics_simulated"
+	default:
+		return ""
+	}
+}
+
+// showcaseStudioEventMapLookup provides deterministic coordinates for Studio's
+// curated public venue catalog. The image route can still use Dash-Go's normal
+// cached/fallback renderer, but the lookup itself never needs a network
+// geocoder and never searches the operator's personal locations.
+func (a *app) showcaseStudioEventMapLookup(query string) map[string]any {
+	needle := strings.ToLower(strings.TrimSpace(query))
+	if needle == "" {
+		return map[string]any{"ok": false, "error": "location required"}
+	}
+	type venue struct {
+		Needle, Label string
+		Lat, Lon      float64
+	}
+	venues := []venue{
+		{"chelsea market", "Chelsea Market, New York, NY", 40.7424, -74.0061},
+		{"new york public library", "New York Public Library, New York, NY", 40.7536, -73.9822},
+		{"riverside park", "Riverside Park, New York, NY", 40.7870, -73.9773},
+		{"american museum of natural history", "American Museum of Natural History, New York, NY", 40.7813, -73.9735},
+		{"food bank for new york city", "Food Bank For New York City, New York, NY", 40.7051, -74.0116},
+		{"whole foods market", "Whole Foods Market, Chicago, IL", 41.8676, -87.6408},
+		{"harold washington library", "Harold Washington Library Center, Chicago, IL", 41.8761, -87.6285},
+		{"millennium park", "Millennium Park, Chicago, IL", 41.8826, -87.6226},
+		{"chicago children's museum", "Chicago Children's Museum, Chicago, IL", 41.8917, -87.6089},
+		{"greater chicago food depository", "Greater Chicago Food Depository, Chicago, IL", 41.8147, -87.7282},
+		{"ui health dental", "UI Health Dental Center, Chicago, IL", 41.8692, -87.6693},
+		{"king soopers", "King Soopers, Denver, CO", 39.7467, -104.9969},
+		{"denver central library", "Denver Central Library, Denver, CO", 39.7375, -104.9896},
+		{"denver museum of nature", "Denver Museum of Nature & Science, Denver, CO", 39.7475, -104.9420},
+		{"food bank of the rockies", "Food Bank of the Rockies, Denver, CO", 39.7790, -104.8620},
+		{"grand central market", "Grand Central Market, Los Angeles, CA", 34.0506, -118.2489},
+		{"los angeles central library", "Los Angeles Central Library, Los Angeles, CA", 34.0505, -118.2551},
+		{"california science center", "California Science Center, Los Angeles, CA", 34.0158, -118.2866},
+		{"los angeles regional food bank", "Los Angeles Regional Food Bank, Los Angeles, CA", 34.0074, -118.2290},
+		{"new sagaya city market", "New Sagaya City Market, Anchorage, AK", 61.2096, -149.9006},
+		{"z. j. loussac library", "Z. J. Loussac Library, Anchorage, AK", 61.1879, -149.8138},
+		{"anchorage museum", "Anchorage Museum, Anchorage, AK", 61.2181, -149.8858},
+		{"food bank of alaska", "Food Bank of Alaska, Anchorage, AK", 61.1951, -149.8402},
+		{"foodland farms", "Foodland Farms Ala Moana, Honolulu, HI", 21.2911, -157.8447},
+		{"hawaii state library", "Hawaii State Library, Honolulu, HI", 21.3076, -157.8587},
+		{"honolulu museum of art", "Honolulu Museum of Art, Honolulu, HI", 21.3028, -157.8486},
+		{"hawaii foodbank", "Hawaii Foodbank, Honolulu, HI", 21.3330, -157.9014},
+	}
+	for _, venue := range venues {
+		if strings.Contains(needle, venue.Needle) {
+			return map[string]any{"ok": true, "lat": venue.Lat, "lon": venue.Lon, "label": venue.Label, "queryUsed": query, "geocoder": "showcase-venue-catalog", "cached": true, "defaultZoom": 15, "defaultStyle": "standard"}
+		}
+	}
+	for _, fallback := range []venue{
+		{"new york", "New York, NY — Studio Preview", 40.7128, -74.0060},
+		{"chicago", "Chicago, IL — Studio Preview", 41.8781, -87.6298},
+		{"denver", "Denver, CO — Studio Preview", 39.7392, -104.9903},
+		{"los angeles", "Los Angeles, CA — Studio Preview", 34.0522, -118.2437},
+		{"anchorage", "Anchorage, AK — Studio Preview", 61.2181, -149.9003},
+		{"honolulu", "Honolulu, HI — Studio Preview", 21.3069, -157.8583},
+	} {
+		if strings.Contains(needle, fallback.Needle) {
+			return map[string]any{"ok": true, "lat": fallback.Lat, "lon": fallback.Lon, "label": fallback.Label, "queryUsed": query, "geocoder": "showcase-city-catalog", "cached": true, "defaultZoom": 13, "defaultStyle": "standard"}
+		}
+	}
+	return map[string]any{"ok": false, "error": "This Studio location is not in the curated public venue catalog.", "queryUsed": query}
+}
+
+func (a *app) showcaseStudioGeocode(query string) map[string]any {
+	needle := strings.ToLower(strings.TrimSpace(query))
+	type place struct {
+		Label string
+		City  string
+		Lat   float64
+		Lon   float64
+	}
+	places := []place{
+		{"New York, New York — Studio Preview", "New York", 40.7128, -74.0060},
+		{"Chicago, Illinois — Studio Preview", "Chicago", 41.8781, -87.6298},
+		{"Denver, Colorado — Studio Preview", "Denver", 39.7392, -104.9903},
+		{"Los Angeles, California — Studio Preview", "Los Angeles", 34.0522, -118.2437},
+		{"Anchorage, Alaska — Studio Preview", "Anchorage", 61.2181, -149.9003},
+		{"Honolulu, Hawaii — Studio Preview", "Honolulu", 21.3069, -157.8583},
+	}
+	results := make([]map[string]any, 0, len(places))
+	for _, place := range places {
+		if needle == "" || strings.Contains(strings.ToLower(place.Label), needle) || strings.Contains(needle, strings.ToLower(place.City)) {
+			results = append(results, map[string]any{"label": place.Label, "city": place.City, "lat": place.Lat, "lon": place.Lon})
+		}
+	}
+	if len(results) == 0 {
+		results = append(results, map[string]any{"label": strings.TrimSpace(query) + " — Studio preview only", "city": strings.TrimSpace(query), "lat": 39.8283, "lon": -98.5795})
+	}
+	return map[string]any{"results": results, "studioPreview": true}
+}

@@ -87,41 +87,41 @@ func TestCDPWindowID(t *testing.T) {
 	}
 }
 
-func TestSelectStartupViewportPrefersLargestSafeLandscapePreset(t *testing.T) {
+func TestSelectStartupViewportUsesBoundedPresentationWindow(t *testing.T) {
 	view, ok := selectStartupViewport(2560, 1440, 16, 80)
 	if !ok {
 		t.Fatal("expected a startup viewport")
 	}
-	if view.ID != "startup-presentation-fit" || view.Width != 2340 || view.Height != 1251 || view.Preview {
-		t.Fatalf("startup viewport = %#v, want native 2340x1251 presentation fit", view)
+	if view.ID != "startup-presentation-fit" || view.Width != 1600 || view.Height != 900 || view.Preview {
+		t.Fatalf("startup viewport = %#v, want bounded native 1600x900 presentation", view)
 	}
 }
 
-func TestSelectStartupViewportBestFitsWhenWallDisplayCannotFitNatively(t *testing.T) {
+func TestSelectStartupViewportFitsSmallerLaptopWorkArea(t *testing.T) {
 	view, ok := selectStartupViewport(1920, 1080, 16, 80)
 	if !ok {
-		t.Fatal("expected a best-fit startup viewport")
+		t.Fatal("expected a startup viewport")
 	}
-	if view.ID != "startup-presentation-fit" || view.Width != 1904 || view.Height != 1000 || view.Orientation != "landscape" || view.Preview {
-		t.Fatalf("startup viewport = %#v, want 1904x1000 native presentation fit", view)
+	if view.ID != "startup-presentation-fit" || view.Width != 1600 || view.Height != 900 || view.Orientation != "landscape" || view.Preview {
+		t.Fatalf("startup viewport = %#v, want 1600x900 native presentation", view)
 	}
 
 	laptop, ok := selectStartupViewport(1366, 768, 16, 80)
 	if !ok {
-		t.Fatal("expected a best-fit startup viewport on a laptop display")
+		t.Fatal("expected a fitted startup viewport on a laptop display")
 	}
-	if laptop.ID != "startup-presentation-fit" || laptop.Width != 1350 || laptop.Height != 688 || laptop.Preview {
-		t.Fatalf("laptop startup viewport = %#v, want 1350x688 native presentation fit", laptop)
+	if laptop.ID != "startup-presentation-fit" || laptop.Width != 1223 || laptop.Height != 688 || laptop.Preview {
+		t.Fatalf("laptop startup viewport = %#v, want 1223x688 native presentation", laptop)
 	}
 }
 
-func TestSelectStartupViewportUsesHighResolutionWorkArea(t *testing.T) {
+func TestSelectStartupViewportDoesNotGrowWithHighResolutionWorkArea(t *testing.T) {
 	view, ok := selectStartupViewport(3840, 2160, 16, 80)
 	if !ok {
 		t.Fatal("expected a startup viewport")
 	}
-	if view.Width != 3518 || view.Height != 1913 || view.Width <= 1920 || view.Height <= 1080 || view.Preview {
-		t.Fatalf("startup viewport = %#v, want native 3518x1913 high-resolution presentation", view)
+	if view.Width != 1600 || view.Height != 900 || view.Preview {
+		t.Fatalf("startup viewport = %#v, want bounded 1600x900 presentation", view)
 	}
 }
 
@@ -131,5 +131,39 @@ func TestSelectStartupViewportLeavesNoFitToMaximize(t *testing.T) {
 	}
 	if view, ok := selectStartupViewport(0, 1080, 16, 80); ok {
 		t.Fatalf("unexpected startup viewport for invalid work area: %#v", view)
+	}
+}
+
+func TestFitPreviewContentsPreservesAspectRatio(t *testing.T) {
+	width, height, scale, ok := fitPreviewContents(1366, 768, 16, 80, 1920, 1080)
+	if !ok {
+		t.Fatal("expected a fitted landscape preview")
+	}
+	if width != 1223 || height != 688 || scale < 0.636 || scale > 0.638 {
+		t.Fatalf("landscape preview = %dx%d @ %.4f, want 1223x688 @ about 0.637", width, height, scale)
+	}
+
+	width, height, scale, ok = fitPreviewContents(1920, 1080, 16, 80, 1080, 1920)
+	if !ok {
+		t.Fatal("expected a fitted portrait preview")
+	}
+	if width != 563 || height != 1000 || scale < 0.520 || scale > 0.522 {
+		t.Fatalf("portrait preview = %dx%d @ %.4f, want 563x1000 @ about 0.521", width, height, scale)
+	}
+}
+
+func TestFitPreviewContentsNeverUpscalesExactViewport(t *testing.T) {
+	width, height, scale, ok := fitPreviewContents(2560, 1440, 16, 80, 1280, 800)
+	if !ok || width != 1280 || height != 800 || scale != 1 {
+		t.Fatalf("exact preview = %dx%d @ %.4f, want 1280x800 @ 1", width, height, scale)
+	}
+}
+
+func TestBrowserBoundIntRejectsFractionalValues(t *testing.T) {
+	if got, ok := browserBoundInt(float64(1600)); !ok || got != 1600 {
+		t.Fatalf("browserBoundInt(1600) = %d, %v", got, ok)
+	}
+	if _, ok := browserBoundInt(float64(1600.5)); ok {
+		t.Fatal("fractional browser bound was accepted")
 	}
 }

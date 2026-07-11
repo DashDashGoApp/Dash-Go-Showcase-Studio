@@ -51,6 +51,39 @@ def main() -> int:
             else:
                 path.write_text("package main\n", encoding="utf-8")
 
+        (app / "ui/js").mkdir(parents=True, exist_ok=True)
+        (app / "ui/css/dashboard").mkdir(parents=True, exist_ok=True)
+        (app / "ui/js/bundle.manifest.json").write_text(
+            json.dumps({"schema": 1, "bundles": {"app": ["family-board-footer.js", "showcase-tour.js", "showcase-view.js", "showcase-calendar-sandbox.js"], "control": ["control-navigation.js"]}}) + "\n",
+            encoding="utf-8",
+        )
+        (app / "ui/css/bundle.manifest.json").write_text(
+            json.dumps({"schema": 1, "bundles": {"dashboard": ["dashboard/showcase-studio.css"], "control": ["control/layout.css"]}}) + "\n",
+            encoding="utf-8",
+        )
+        assets = ROOT / "tools/native_extension_assets"
+        (app / "ui/js/showcase-tour.js").write_text((assets / "showcase-tour.js").read_text(encoding="utf-8"), encoding="utf-8")
+        (app / "ui/js/showcase-view.js").write_text((assets / "showcase-view.js").read_text(encoding="utf-8"), encoding="utf-8")
+        (app / "ui/js/showcase-calendar-sandbox.js").write_text((assets / "showcase-calendar-sandbox.js").read_text(encoding="utf-8"), encoding="utf-8")
+        (app / "ui/css/dashboard/showcase-studio.css").write_text((assets / "showcase-studio.css").read_text(encoding="utf-8"), encoding="utf-8")
+        (app / "cmd/dashboard-control-server/showcase_studio_extension.go").write_text(
+            (assets / "showcase_studio_extension.go.txt").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        (app / "cmd/dashboard-control-server/showcase_studio_calendar.go").write_text(
+            (assets / "showcase_studio_calendar.go.txt").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        (app / "cmd/dashboard-control-server/calendar_writeback.go").write_text(
+            'package main\nvar _ = map[string]any{"sync": "session"}\nvar _ = showcaseSessionCalendarMessage\n',
+            encoding="utf-8",
+        )
+        (app / "ui/js/control-location-lock.js").write_text("window.showcaseStudioLocationLocked();\n", encoding="utf-8")
+        (app / "ui/js/control-navigation.js").write_text(
+            "function bindCtrlSummaryTaps(){document.querySelectorAll('summary').forEach(s=>{s._fastSummaryBound=true;});}\nasync function loadCtrlSection(){}\n",
+            encoding="utf-8",
+        )
+
         # This is the exact Phase 4 native path that failed for Dash-Go 1.5.9.
         # Passing four values proves the helper carries the matrix into the
         # three-argument verifier rather than raising a late TypeError.

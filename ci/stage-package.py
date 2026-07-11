@@ -470,6 +470,7 @@ def showcase_tour_guard_view_contract(
     native_contract: dict | None,
     native_contract_matrix: dict | None,
 ) -> None:
+    native = native_contract is not None
     if native_contract is not None:
         if native_contract_matrix is None:
             raise BuildFailure(
@@ -478,7 +479,6 @@ def showcase_tour_guard_view_contract(
                 "native Showcase contract selection is missing its validated runtime-contract matrix",
             )
         verify_native_showcase_runtime_contract(app, native_contract, native_contract_matrix)
-        return
     phase_name = "Showcase Tour, guard, and viewport contract"
     js_manifest = json.loads((app / "ui/js/bundle.manifest.json").read_text(encoding="utf-8"))
     app_sources = js_manifest.get("bundles", {}).get("app")
@@ -495,7 +495,9 @@ def showcase_tour_guard_view_contract(
         "tour": app / "ui/js/showcase-tour.js",
         "view": app / "ui/js/showcase-view.js",
         "style": app / "ui/css/dashboard/showcase-studio.css",
-        "mode": app / "cmd/dashboard-control-server/showcase_mode.go",
+        "calendar": app / "ui/js/showcase-calendar-sandbox.js",
+        "mode": app / "cmd/dashboard-control-server/showcase_studio_extension.go" if native else app / "cmd/dashboard-control-server/showcase_mode.go",
+        "calendarMode": app / "cmd/dashboard-control-server/showcase_studio_calendar.go" if native else app / "cmd/dashboard-control-server/showcase_calendar_sandbox.go",
         "location": app / "ui/js/control-location-lock.js",
         "navigation": app / "ui/js/control-navigation.js",
     }
@@ -504,6 +506,8 @@ def showcase_tour_guard_view_contract(
     tour = files["tour"].read_text(encoding="utf-8")
     view = files["view"].read_text(encoding="utf-8")
     mode = files["mode"].read_text(encoding="utf-8")
+    calendar = files["calendar"].read_text(encoding="utf-8")
+    calendar_mode = files["calendarMode"].read_text(encoding="utf-8")
     location = files["location"].read_text(encoding="utf-8")
     navigation = files["navigation"].read_text(encoding="utf-8")
     for token in (
@@ -518,7 +522,9 @@ def showcase_tour_guard_view_contract(
         "Clean View",
         "Presentation Fit",
         "Use this display · high-DPI",
-        "Device previews emulate exact CSS viewports.",
+        "Device previews preserve the selected CSS aspect ratio",
+        "scalePercent",
+        "hostWidth",
         "wall-landscape",
         "laptop",
         "wide-tablet",
@@ -535,32 +541,51 @@ def showcase_tour_guard_view_contract(
                 "Viewport contract",
                 f"staged Showcase View still exposes retired live preset {retired!r}",
             )
-    for token in ("studio_location_locked", "studio_system_action_locked", "studio_file_import_locked", "studio_external_integration_locked", "studio_security_locked", "showcaseGeocode"):
+    geocode_token = "showcaseStudioGeocode" if native else "showcaseGeocode"
+    guard_tokens = ["studio_location_locked", "studio_system_action_locked", "studio_file_import_locked", "studio_external_integration_locked", "studio_security_locked", geocode_token]
+    if native:
+        guard_tokens.extend(["showcaseStudioWeatherPayload", "showcaseStudioEventMapLookup", "showcase-fixture"])
+    for token in guard_tokens:
         if token not in mode:
             raise BuildFailure(phase_name, "Studio guard", f"staged guard is missing {token!r}")
-    runtime_main = (app / "cmd/dashboard-control-server/main.go").read_text(encoding="utf-8")
-    for token in (
-        "data := dashGoShowcaseDataRoot(dash)",
-        "configDir: filepath.Join(data, \"config\")",
-        "calDir: filepath.Join(data, \"calendars\")",
-        "cacheDir: filepath.Join(data, \"cache\")",
-        "logDir: filepath.Join(data, \"logs\")",
-        "fontsDir: filepath.Join(data, \"fonts\")",
-    ):
-        if token not in runtime_main:
-            raise BuildFailure(phase_name, "Runtime data-root contract", f"staged Showcase runtime is missing {token!r}")
-    for retired in (
-        "configDir: filepath.Join(dash, \"config\")",
-        "calDir: filepath.Join(dash, \"calendars\")",
-        "cacheDir: filepath.Join(dash, \"cache\")",
-        "logDir: filepath.Join(dash, \"logs\")",
-        "fontsDir: filepath.Join(dash, \"fonts\")",
-    ):
-        if retired in runtime_main:
-            raise BuildFailure(phase_name, "Runtime data-root contract", f"staged Showcase runtime still writes mutable data under its install root: {retired}")
-    for token in ("DASHGO_SHOWCASE_DATA_ROOT", "dashGoShowcaseDataRoot"):
-        if token not in mode:
-            raise BuildFailure(phase_name, "Runtime data-root contract", f"staged Showcase mode overlay is missing {token!r}")
+    for token in ("showcaseMoveCalendarEvent", "showcaseDeleteCalendarSeries", "/api/calendar/event/move", "/api/calendar/event/series/delete"):
+        if token not in calendar:
+            raise BuildFailure(phase_name, "Session calendar contract", f"staged Studio calendar sandbox is missing {token!r}")
+    for token in ("showcaseCalendarMove", "showcaseCalendarDeleteSeries", "showcaseSessionCalendarMessage"):
+        if token not in calendar_mode:
+            raise BuildFailure(phase_name, "Session calendar contract", f"staged Studio calendar runtime is missing {token!r}")
+    if native:
+        for token in ("showcaseWritableCalendarSource", "showcaseStudioSystemUpdateStatus", "showcaseStudioUpdateAvailability"):
+            if token not in mode:
+                raise BuildFailure(phase_name, "Native extension contract", f"staged native Studio extension is missing {token!r}")
+        writeback = (app / "cmd/dashboard-control-server/calendar_writeback.go").read_text(encoding="utf-8")
+        for token in ('"sync": "session"', "showcaseSessionCalendarMessage"):
+            if token not in writeback:
+                raise BuildFailure(phase_name, "Session calendar contract", f"staged native calendar writeback is missing {token!r}")
+    if not native:
+        runtime_main = (app / "cmd/dashboard-control-server/main.go").read_text(encoding="utf-8")
+        for token in (
+            "data := dashGoShowcaseDataRoot(dash)",
+            "configDir: filepath.Join(data, \"config\")",
+            "calDir: filepath.Join(data, \"calendars\")",
+            "cacheDir: filepath.Join(data, \"cache\")",
+            "logDir: filepath.Join(data, \"logs\")",
+            "fontsDir: filepath.Join(data, \"fonts\")",
+        ):
+            if token not in runtime_main:
+                raise BuildFailure(phase_name, "Runtime data-root contract", f"staged Showcase runtime is missing {token!r}")
+        for retired in (
+            "configDir: filepath.Join(dash, \"config\")",
+            "calDir: filepath.Join(dash, \"calendars\")",
+            "cacheDir: filepath.Join(dash, \"cache\")",
+            "logDir: filepath.Join(dash, \"logs\")",
+            "fontsDir: filepath.Join(dash, \"fonts\")",
+        ):
+            if retired in runtime_main:
+                raise BuildFailure(phase_name, "Runtime data-root contract", f"staged Showcase runtime still writes mutable data under its install root: {retired}")
+        for token in ("DASHGO_SHOWCASE_DATA_ROOT", "dashGoShowcaseDataRoot"):
+            if token not in mode:
+                raise BuildFailure(phase_name, "Runtime data-root contract", f"staged Showcase mode overlay is missing {token!r}")
     if "showcaseStudioLocationLocked" not in location:
         raise BuildFailure(phase_name, "Location lock", "staged location editor does not map Studio lock response to its modal")
     summary_start = navigation.find("function bindCtrlSummaryTaps()")
@@ -969,6 +994,18 @@ def main() -> int:
                     "nativeRuntimePlan": ctx.native_runtime_plan,
                 })
                 print(f"PASS: selected native Dash-Go Showcase contract for {ctx.dashgo_version}")
+                run(
+                    ctx,
+                    "Install Studio-owned native presentation, safety, and session-calendar extensions",
+                    [
+                        sys.executable,
+                        str(source / "tools/install_showcase_native_extensions.py"),
+                        "--app", str(app),
+                        "--gofmt", str(Path(ctx.go).with_name("gofmt")),
+                    ],
+                    cwd=source,
+                    timeout=240,
+                )
             else:
                 ctx.showcase_runtime_mode = "legacy-bridge"
                 run(

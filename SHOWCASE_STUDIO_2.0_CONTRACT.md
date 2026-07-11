@@ -71,6 +71,43 @@ route plan that Studio will use. The Windows installer lane re-derives and
 compares that witness from its staged package before it builds or launches the
 installer.
 
+## Native presentation and safety extension
+
+Native `dashgo-showcase/v1` deliberately owns scenario activation, disposable data,
+calendar writeback scope, cache readiness, status reporting, and static scenario
+assets. It does not own Studio's Tour, presentation controls, fixture-only
+location behavior, or host-action restrictions. Stage therefore installs one
+checked Studio-owned extension onto a native source extraction before invoking
+Dash-Go's source-owned browser-asset generator.
+
+That extension adds the Tour and Showcase View split sources, Studio CSS, the
+location-lock bridge, offline synthetic weather, geocoding, curated event-map lookup, and server-side denial of
+external, security, update, host-system, import/restore, and diagnostic actions.
+It also adds the Studio session-calendar controls and mutations that sit above the
+native manifest allowlist: enabled writable scenario calendars can be edited,
+moved, or have a series removed, every response is marked `sync: session`, and
+no provider synchronization is queued. It is not the legacy runtime/data overlay:
+it does not replace native data-root, manifest, calendar allowlisting, cache, or
+readiness behavior. Native Stage validates the extension and its final manifest
+order, and PR, Stage, and prepublication lanes run its hermetic installer
+regression.
+
+## Showcase View sizing contract
+
+Normal non-kiosk startup uses a bounded bootstrap window while Chromium starts,
+then waits with a bounded retry for the private DevTools endpoint. The preferred
+content size is 1600 × 900; smaller work areas receive the largest proportional
+16:9 fit that remains at least 1024 × 600. The selected window is centered in
+the active display work area and no operating-system display setting changes.
+
+Device previews keep the requested CSS viewport exact. Studio computes one
+uniform scale from the available width and height, sizes the native browser
+contents to that same aspect ratio, centers the window, and applies Chromium's
+device-metrics override. It never independently clamps width and height, never
+upscales a preview beyond 100 percent, and reports CSS dimensions, native host
+dimensions, and scale percentage in the Showcase View panel. Presentation Fit
+clears emulation and maximizes the normal high-DPI browser window.
+
 ## Source-owned browser asset generation
 
 Studio does not reimplement current Dash-Go JavaScript or CSS bundle semantics.

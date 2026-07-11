@@ -42,6 +42,7 @@ def main() -> int:
         "tools/validate_studio_runtime_contract_matrix.py --root .",
         "python3 tools/test_showcase_runtime_contract.py",
         "python3 tools/test_stage_package_native_contract.py",
+        'python3 tools/test_install_showcase_native_extensions.py --gofmt "$(go env GOROOT)/bin/gofmt"',
         "tools/validate_studio_native_contract_beta.py --root .",
         "python3 tools/test_prepare_dashgo_release_beta.py",
     )
@@ -52,6 +53,7 @@ def main() -> int:
         "tools/validate_studio_runtime_contract_matrix.py --root .",
         "tools/test_showcase_runtime_contract.py",
         "tools/test_stage_package_native_contract.py",
+        'python3 tools/test_install_showcase_native_extensions.py --gofmt "$(go env GOROOT)/bin/gofmt"',
         "tools/validate_studio_native_contract_beta.py --root .",
         "tools/test_prepare_dashgo_release_beta.py",
         "candidate_origin:",
@@ -109,6 +111,8 @@ def main() -> int:
         "beta native candidate releasePackageVersion",
         "native_runtime_plan_evidence",
         '"nativeRuntimePlan": ctx.native_runtime_plan',
+        "install_showcase_native_extensions.py",
+        "Install Studio-owned native presentation, safety, and session-calendar extensions",
     )
     require_text(
         package,
